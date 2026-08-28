@@ -1,20 +1,19 @@
 // ═══════════════════════════════════════════════════
 // CLIENTE EVOLUTION API
 // Toda comunicação com o servidor Evolution API passa por aqui.
+// (Adaptado pro Vercel — configuração só via variáveis de ambiente)
 // ═══════════════════════════════════════════════════
 const axios = require("axios");
 
-// Configure isso no Firebase (veja README.md -> "Configurar variáveis"):
-// firebase functions:config:set evolution.url="https://SEU-EVOLUTION-SERVER" evolution.apikey="SUA_API_KEY"
-const functions = require("firebase-functions");
-
+// Configure no painel da Vercel (Project -> Settings -> Environment Variables):
+//   EVOLUTION_URL    = https://SEU-EVOLUTION-SERVER
+//   EVOLUTION_APIKEY = SUA_API_KEY
 function getConfig() {
-  const cfg = functions.config().evolution || {};
-  const url = process.env.EVOLUTION_URL || cfg.url;
-  const apikey = process.env.EVOLUTION_APIKEY || cfg.apikey;
+  const url = process.env.EVOLUTION_URL;
+  const apikey = process.env.EVOLUTION_APIKEY;
   if (!url || !apikey) {
     throw new Error(
-      "Evolution API não configurada. Rode: firebase functions:config:set evolution.url=... evolution.apikey=..."
+      "Evolution API não configurada. Defina EVOLUTION_URL e EVOLUTION_APIKEY nas variáveis de ambiente da Vercel."
     );
   }
   return { url: url.replace(/\/$/, ""), apikey };

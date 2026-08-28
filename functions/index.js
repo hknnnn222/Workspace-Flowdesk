@@ -1,13 +1,35 @@
 // ═══════════════════════════════════════════════════
-// FLOWDESK BACKEND — Firebase Functions + Evolution API
+// FLOWDESK BACKEND — Vercel Serverless Function + Evolution API
+// (Antes rodava no Firebase Functions; Firestore continua sendo
+//  o banco de dados, só o "cérebro" (código) que agora roda aqui)
 // ═══════════════════════════════════════════════════
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
-const evo = require("./evolution");
+const evo = require("../lib/evolution");
 
-admin.initializeApp();
+// ─────────────────────────────────────────────────────
+// Inicializa o Firebase Admin usando uma Service Account
+// (arquivo JSON que você baixa no Console do Firebase:
+//  Configurações do projeto -> Contas de serviço -> Gerar nova chave)
+//
+// Na Vercel, cole o CONTEÚDO INTEIRO desse JSON numa variável de
+// ambiente chamada FIREBASE_SERVICE_ACCOUNT (Project -> Settings ->
+// Environment Variables). Não precisa de cartão pra isso.
+// ─────────────────────────────────────────────────────
+if (!admin.apps.length) {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) {
+    throw new Error(
+      "Faltou configurar a variável de ambiente FIREBASE_SERVICE_ACCOUNT na Vercel (cole o JSON da service account do Firebase)."
+    );
+  }
+  const serviceAccount = JSON.parse(raw);
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+}
+
 const db = admin.firestore();
 
 const app = express();
@@ -52,8 +74,8 @@ app.post("/api/claim-tenant", requireAuth, async (req, res) => {
 
 // ─────────────────────────────────────────────────────
 // 1) WEBHOOK — recebe eventos da Evolution API (mensagens, status, QR)
-//    Configure na Evolution API: URL = https://SEU-PROJETO.cloudfunctions.net/webhook/:instanceName
-//    NÃO exige auth (a Evolution API não manda token seu) — validamos pela apikey no header se disponível.
+//    Configure na Evolution API: URL = https://SEU-PROJETO.vercel.app/webhook/:instanceName
+//    NÃO exige auth (a Evolution API não manda token seu).
 // ─────────────────────────────────────────────────────
 app.post("/webhook/:instanceName", async (req, res) => {
   const { instanceName } = req.params; // = tenantId, por convenção
@@ -170,9 +192,10 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     const { tenantId } = req.body;
     if (!tenantId) return res.status(400).json({ error: "tenantId obrigatório" });
 
-    const projectId = process.env.GCLOUD_PROJECT || admin.app().options.projectId;
-    const region = "us-central1"; // ajuste se usar outra região
-    const webhookUrl = `https://${region}-${projectId}.cloudfunctions.net/api/webhook/${tenantId}`;
+    // Antes usava a região/projeto do Firebase pra montar a URL do webhook.
+    // Agora usamos o domínio da própria Vercel (fixo, sem cartão).
+    const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+    const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
 
     await evo.createInstance(tenantId, webhookUrl).catch((e) => {
       // se a instância já existir, seguimos e só buscamos o QR
@@ -212,4 +235,4 @@ app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
   }
 });
 
-exports.api = functions.https.onRequest(app);
+module.exports = app;
