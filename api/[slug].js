@@ -196,7 +196,6 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
     const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
 
-    // Se a instância já existir na Evolution API, ignora o erro e segue em frente
     try {
       await evo.createInstance(tenantId, webhookUrl);
     } catch (e) {
@@ -206,14 +205,23 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
       }
     }
 
-    // Busca o QR Code atualizado
     const qrData = await evo.getQrCode(tenantId);
 
-    // Limpa o formato da imagem base64
     let rawBase64 = qrData?.base64 || qrData?.qrcode?.base64 || qrData?.code || "";
     if (rawBase64.includes(",")) {
       rawBase64 = rawBase64.split(",")[1];
     }
+
+    // Salva o status inicial no Firestore
+    const instanceRef = db.collection("instances").doc(tenantId);
+    await instanceRef.set(
+      {
+        status: "qrcode",
+        qrcode: rawBase64,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
 
     res.json({
       ok: true,
@@ -229,10 +237,24 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────
 // 4) STATUS DA CONEXÃO
 // ─────────────────────────────────────────────────────
+// 4) STATUS DA CONEXÃO
+// ------------------------------------------------------------------
 app.get("/api/whatsapp/status/:tenantId", requireAuth, async (req, res) => {
   try {
-    const status = await evo.getStatus(req.params.tenantId);
-    res.json({ ok: true, status });
+    const { tenantId } = req.params;
+    const connectionState = await evo.getConnectionState(tenantId);
+
+    const state = connectionState?.instance?.state || "close";
+    const instanceRef = db.collection("instances").doc(tenantId);
+
+    if (state === "open") {
+      await instanceRef.set(
+        { status: "CONNECTED", updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }
+
+    res.json({ ok: true, state });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
   }
