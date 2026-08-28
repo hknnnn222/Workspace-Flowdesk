@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/:match*",
-      "destination": "https://evolution-api-7jzj.onrender.com/:match*"
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
     }
   ]
 }
