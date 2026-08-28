@@ -1641,12 +1641,20 @@ function BotModule({workspaceId, workspaceName, userId}){
   setConnecting(true);
   try {
     const res = await api.connectWhatsapp(workspaceId);
-    setWaStatus(prev => ({
-      ...(prev || {}),
+    
+    // Extrai o base64 de qualquer estrutura possível da Evolution API
+    const qrCodeBase64 = res?.qrcode?.base64 || res?.qrcode || res?.base64 || res?.code || null;
+
+    if (!qrCodeBase64) {
+      throw new Error("Não foi possível obter a imagem do QR Code.");
+    }
+
+    setWaStatus({
       status: 'qrcode',
-      qrcode: res.qrcode || (prev && prev.qrcode) || null
-    }));
+      qrcode: qrCodeBase64
+    });
   } catch(err) {
+    console.error("Erro ao conectar:", err);
     setActionError(String(err.message || err));
   } finally {
     setConnecting(false);
@@ -1772,15 +1780,19 @@ function BotModule({workspaceId, workspaceName, userId}){
       WhatsApp no celular de <strong>{workspaceName}</strong> → Aparelhos conectados → Conectar um aparelho.
     </div>
     <div className="fd-qr-box">
-      <img
-        src={
-          waStatus?.qrcode?.startsWith("data:")
-            ? waStatus.qrcode
-            : `data:image/png;base64,${waStatus?.qrcode}`
-        }
-        alt="QR Code do WhatsApp"
-      />
-    </div>
+  {waStatus?.qrcode ? (
+    <img
+      src={
+        waStatus.qrcode.startsWith("data:")
+          ? waStatus.qrcode
+          : `data:image/png;base64,${waStatus.qrcode}`
+      }
+      alt="QR Code do WhatsApp"
+    />
+  ) : (
+    <div style={{ padding: '20px', color: '#ccc' }}>Carregando QR Code...</div>
+  )}
+</div>
     <button
       className="btn primary"
       onClick={handleConnect}
