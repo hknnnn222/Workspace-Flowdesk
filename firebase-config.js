@@ -4,14 +4,13 @@
 // Veja o README-INTEGRACAO.md para o passo a passo completo.
 // ═══════════════════════════════════════════════════
 const firebaseConfig = {
-  apiKey: "COLE_AQUI",
-  authDomain: "SEU-PROJETO.firebaseapp.com",
-  projectId: "SEU-PROJETO",
-  storageBucket: "SEU-PROJETO.appspot.com",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI",
+  apiKey: "AIzaSyCMhxIibrC9pkj8YKhrm_A7ujXf5nzzOKM",
+  authDomain: "workspace-9a703.firebaseapp.com",
+  projectId: "workspace-9a703",
+  storageBucket: "workspace-9a703.firebasestorage.app",
+  messagingSenderId: "229273041998",
+  appId: "1:229273041998:web:956d950f5628c18bb0d71f",
 };
-
 // Detecta se o projeto ainda não foi configurado (placeholders não preenchidos)
 const FIREBASE_CONFIGURED = firebaseConfig.apiKey !== "COLE_AQUI" && !!firebaseConfig.projectId && firebaseConfig.projectId !== "SEU-PROJETO";
 
