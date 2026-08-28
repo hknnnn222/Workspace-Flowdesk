@@ -193,18 +193,33 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     const { tenantId } = req.body;
     if (!tenantId) return res.status(400).json({ error: "tenantId obrigatório" });
 
-    // Antes usava a região/projeto do Firebase pra montar a URL do webhook.
-    // Agora usamos o domínio da própria Vercel (fixo, sem cartão).
     const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
     const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
 
-    await evo.createInstance(tenantId, webhookUrl).catch((e) => {
-      // se a instância já existir, seguimos e só buscamos o QR
-      if (!String(e.response?.data?.message || "").includes("already")) throw e;
-    });
+    // Se a instância já existir na Evolution API, ignora o erro e segue em frente
+    try {
+      await evo.createInstance(tenantId, webhookUrl);
+    } catch (e) {
+      const errMsg = JSON.stringify(e.response?.data || "");
+      if (!errMsg.includes("already in use") && !errMsg.includes("already")) {
+        throw e;
+      }
+    }
 
-    const qr = await evo.getQrCode(tenantId);
-    res.json({ ok: true, qrcode: qr.base64 || qr.qrcode?.base64, pairingCode: qr.pairingCode });
+    // Busca o QR Code atualizado
+    const qrData = await evo.getQrCode(tenantId);
+
+    // Limpa o formato da imagem base64
+    let rawBase64 = qrData?.base64 || qrData?.qrcode?.base64 || qrData?.code || "";
+    if (rawBase64.includes(",")) {
+      rawBase64 = rawBase64.split(",")[1];
+    }
+
+    res.json({
+      ok: true,
+      qrcode: rawBase64,
+      pairingCode: qrData?.pairingCode || null,
+    });
   } catch (err) {
     console.error("Erro ao conectar WhatsApp:", err.response?.data || err);
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
