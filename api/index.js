@@ -6,7 +6,8 @@
 const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
-const evo = require("../lib/evolution");
+// Substitua a linha 7 por isso:
+const evo = require("../functions/evolution");
 
 // ─────────────────────────────────────────────────────
 // Inicializa o Firebase Admin usando uma Service Account
