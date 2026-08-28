@@ -188,7 +188,9 @@ app.post("/api/send", requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────
 // 3) CONECTAR WHATSAPP — cria instância + retorna QR code
 // ─────────────────────────────────────────────────────
-app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
+// 3) CONECTAR WHATSAPP - cria instância + retorna QR code
+// ------------------------------------------------------------------
+app.post("/api/whatsapp/connect", async (req, res) => {
   try {
     const { tenantId } = req.body;
     if (!tenantId) return res.status(400).json({ error: "tenantId obrigatório" });
@@ -199,37 +201,75 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     try {
       await evo.createInstance(tenantId, webhookUrl);
     } catch (e) {
-      const errMsg = JSON.stringify(e.response?.data || "");
-      if (!errMsg.includes("already in use") && !errMsg.includes("already")) {
-        throw e;
-      }
+      console.log("Instância já existe ou aviso da Evolution API:", e?.message);
     }
 
     const qrData = await evo.getQrCode(tenantId);
-
     let rawBase64 = qrData?.base64 || qrData?.qrcode?.base64 || qrData?.code || "";
+
     if (rawBase64.includes(",")) {
       rawBase64 = rawBase64.split(",")[1];
     }
 
-    // Salva o status inicial no Firestore
-    const instanceRef = db.collection("instances").doc(tenantId);
-    await instanceRef.set(
-      {
-        status: "qrcode",
-        qrcode: rawBase64,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    try {
+      const instanceRef = db.collection("instances").doc(tenantId);
+      await instanceRef.set(
+        { status: "qrcode", qrcode: rawBase64, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch (dbErr) {
+      console.warn("Aviso ao salvar no Firestore:", dbErr?.message);
+    }
 
-    res.json({
+    return res.json({
       ok: true,
       qrcode: rawBase64,
       pairingCode: qrData?.pairingCode || null,
     });
   } catch (err) {
-    console.error("Erro ao conectar WhatsApp:", err.response?.data || err);
+    console.error("Erro fatal ao gerar QR code:", err);
+    return res.status(500).json({ ok: false, error: err?.response?.data || String(err) });
+  }
+});
+
+// 4) STATUS DA CONEXÃO
+// ------------------------------------------------------------------
+app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    
+    let state = "close";
+    try {
+      const result = await evo.getStatus(tenantId);
+      state = result?.instance?.state || result?.state || "close";
+    } catch (evoErr) {
+      console.warn("Evolution API não respondeu o status:", evoErr?.message);
+    }
+
+    const instanceRef = db.collection("instances").doc(tenantId);
+
+    if (state === "open" || state === "CONNECTED") {
+      await instanceRef.set(
+        { status: "CONNECTED", updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }
+
+    res.json({ ok: true, state });
+  } catch (err) {
+    console.error("Erro na rota de status:", err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// 5) DESCONECTAR WHATSAPP
+// ------------------------------------------------------------------
+app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
+  try {
+    const { tenantId } = req.body;
+    await evo.deleteInstance(tenantId);
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
   }
 });
