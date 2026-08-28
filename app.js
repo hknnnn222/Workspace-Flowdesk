@@ -1589,11 +1589,11 @@ function BotModule({workspaceId, workspaceName, userId}){
   },[configured, workspaceId]);
 
   // 2) Escuta em tempo real o status da conexão do WhatsApp desta empresa
-  useEffect(()=>{
-    if(!configured || !sessionReady || !workspaceId) return;
-    const unsub = api.listenWhatsappStatus(workspaceId, (data)=> setWaStatus(data));
-    return ()=> unsub && unsub();
-  },[configured, sessionReady, workspaceId]);
+  useEffect(() => {
+  if (!configured || !sessionReady || !workspaceId) return;
+  const unsub = api.listenWhatsappStatus(workspaceId, (data) => setWaStatus(data));
+  return () => unsub && unsub();
+}, [configured, sessionReady, workspaceId]);
 
   // 3) Escuta contatos em tempo real (conversas recebidas via WhatsApp)
   useEffect(()=>{
