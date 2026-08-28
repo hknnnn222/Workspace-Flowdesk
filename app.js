@@ -1765,36 +1765,46 @@ function BotModule({workspaceId, workspaceName, userId}){
         <div className="fd-connect-wrap">
           <div className="onboard-card">
             {actionError && <div className="fd-error">{actionError}</div>}
-            {isConnecting && waStatus?.qrcode ? (
-              <>
-                <div className="onboard-card-title">Escaneie o QR code</div>
-                <div className="onboard-card-sub">
-                  WhatsApp no celular de <strong>{workspaceName}</strong> → Aparelhos conectados → Conectar um aparelho.
-                </div>
-                <div className="fd-qr-box">
-  <img
-    src={
-  waStatus.qrcode.startsWith("data:")
-    ? waStatus.qrcode
-    : `data:image/png;base64,${waStatus.qrcode}`
-}
-    alt="QR Code do WhatsApp"
-  />
-</div>
-                <button className="btn primary" onClick={handleConnect} disabled={connecting}>Gerar novo QR code</button>
-              </>
-            ) : (
-              <>
-                <div className="onboard-card-title">Conectar WhatsApp</div>
-                <div className="onboard-card-sub">
-                  Cada empresa conecta o próprio número (via Evolution API). Conecte o número
-                  comercial de <strong>{workspaceName}</strong> pra o bot atender de verdade.
-                </div>
-                <button className="btn primary" onClick={handleConnect} disabled={connecting}>
-                  {connecting ? 'Gerando QR code…' : 'Conectar WhatsApp'}
-                </button>
-              </>
-            )}
+            {isConnecting || waStatus?.qrcode ? (
+  <>
+    <div className="onboard-card-title">Escaneie o QR code</div>
+    <div className="onboard-card-sub">
+      WhatsApp no celular de <strong>{workspaceName}</strong> → Aparelhos conectados → Conectar um aparelho.
+    </div>
+    <div className="fd-qr-box">
+      <img
+        src={
+          waStatus?.qrcode?.startsWith("data:")
+            ? waStatus.qrcode
+            : `data:image/png;base64,${waStatus?.qrcode}`
+        }
+        alt="QR Code do WhatsApp"
+      />
+    </div>
+    <button
+      className="btn primary"
+      onClick={handleConnect}
+      disabled={connecting}
+    >
+      {connecting ? "Gerando QR code..." : "Gerar novo QR code"}
+    </button>
+  </>
+) : (
+  <>
+    <div className="onboard-card-title">Conectar WhatsApp</div>
+    <div className="onboard-card-sub">
+      Cada empresa conecta o próprio número (via Evolution API). Conecte o número
+      comercial de <strong>{workspaceName}</strong> pra o bot atender de verdade.
+    </div>
+    <button
+      className="btn primary"
+      onClick={handleConnect}
+      disabled={connecting}
+    >
+      {connecting ? "Gerando QR code..." : "Conectar WhatsApp"}
+    </button>
+  </>
+)}
           </div>
         </div>
       ) : (
