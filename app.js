@@ -1741,7 +1741,16 @@ function BotModule({workspaceId, workspaceName, userId}){
                 <div className="onboard-card-sub">
                   WhatsApp no celular de <strong>{workspaceName}</strong> → Aparelhos conectados → Conectar um aparelho.
                 </div>
-                <div className="fd-qr-box"><img src={`data:image/png;base64,${waStatus.qrcode}`} alt="QR Code do WhatsApp" /></div>
+                <div className="fd-qr-box">
+  <img
+    src={
+  waStatus.qrcode.startsWith("data:")
+    ? waStatus.qrcode
+    : `data:image/png;base64,${waStatus.qrcode}`
+}
+    alt="QR Code do WhatsApp"
+  />
+</div>
                 <button className="btn primary" onClick={handleConnect} disabled={connecting}>Gerar novo QR code</button>
               </>
             ) : (

@@ -24,7 +24,7 @@ function client() {
   return axios.create({
     baseURL: url,
     headers: { apikey, "Content-Type": "application/json" },
-    timeout: 15000,
+    timeout: 60000,
   });
 }
 
