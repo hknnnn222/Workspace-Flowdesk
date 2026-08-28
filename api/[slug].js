@@ -233,21 +233,25 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
   }
 });
-
-// ─────────────────────────────────────────────────────
-// 4) STATUS DA CONEXÃO
 // ─────────────────────────────────────────────────────
 // 4) STATUS DA CONEXÃO
 // ------------------------------------------------------------------
 app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
   try {
     const { tenantId } = req.params;
-    const connectionState = await evo.getConnectionState(tenantId);
+    
+    // Tenta buscar o status na Evolution API usando getStatus
+    let state = "close";
+    try {
+      const result = await evo.getStatus(tenantId);
+      state = result?.instance?.state || result?.state || "close";
+    } catch (evoErr) {
+      console.warn("Evolution API não respondeu o status:", evoErr?.message);
+    }
 
-    const state = connectionState?.instance?.state || "close";
     const instanceRef = db.collection("instances").doc(tenantId);
 
-    if (state === "open") {
+    if (state === "open" || state === "CONNECTED") {
       await instanceRef.set(
         { status: "CONNECTED", updatedAt: new Date().toISOString() },
         { merge: true }
@@ -256,7 +260,8 @@ app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
 
     res.json({ ok: true, state });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.response?.data || String(err) });
+    console.error("Erro na rota de status:", err);
+    res.status(500).json({ ok: false, error: String(err) });
   }
 });
 
