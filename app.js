@@ -1636,18 +1636,22 @@ function BotModule({workspaceId, workspaceName, userId}){
     return ()=> unsub && unsub();
   },[configured, sessionReady, workspaceId, selectedId]);
 
-  async function handleConnect(){
-    setActionError(null);
-    setConnecting(true);
-    try{
-      const res = await api.connectWhatsapp(workspaceId);
-      setWaStatus(prev=>({...(prev||{}), state:'connecting', qrcode: res.qrcode || (prev&&prev.qrcode) || null}));
-    }catch(err){
-      setActionError(String(err.message||err));
-    }finally{
-      setConnecting(false);
-    }
+  async function handleConnect() {
+  setActionError(null);
+  setConnecting(true);
+  try {
+    const res = await api.connectWhatsapp(workspaceId);
+    setWaStatus(prev => ({
+      ...(prev || {}),
+      status: 'qrcode',
+      qrcode: res.qrcode || (prev && prev.qrcode) || null
+    }));
+  } catch(err) {
+    setActionError(String(err.message || err));
+  } finally {
+    setConnecting(false);
   }
+}
 
   async function handleDisconnect(){
     setActionError(null);
