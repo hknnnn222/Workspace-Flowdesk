@@ -1,0 +1,120 @@
+/* ═══════════════════════════════════════════════════
+   Tema visual do FlowDesk original, isolado sob .fd-scope
+   (mesmas variáveis/classes do frontend/style.css do FlowDesk,
+   só adaptadas pra viver dentro da aba "Bot de IA" do workspace
+   em vez de ocupar a tela inteira sozinhas).
+   ═══════════════════════════════════════════════════ */
+.fd-scope {
+  --bg: #0d0f14;
+  --surface: #151820;
+  --surface2: #1c202c;
+  --surface3: #242838;
+  --border: #2a2f3e;
+  --border2: #343a4f;
+  --accent: #4f7cff;
+  --accent2: #6c4fff;
+  --green: #22c55e;
+  --yellow: #f59e0b;
+  --red: #ef4444;
+  --purple: #a855f7;
+  --wa: #25D366;
+  --ig: #E1306C;
+  --text: #e8eaf0;
+  --text2: #9198b0;
+  --text3: #5a6178;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.24);
+  --shadow-md: 0 6px 20px rgba(0,0,0,.28);
+  color-scheme: dark;
+
+  font-family:'DM Sans',sans-serif;
+  background:var(--bg); color:var(--text);
+  height:calc(100vh - 58px); width:100%;
+  display:flex; overflow:hidden;
+}
+.fd-scope *, .fd-scope *::before, .fd-scope *::after{ box-sizing:border-box; }
+.fd-scope ::-webkit-scrollbar{ width:4px; }
+.fd-scope ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:2px; }
+
+/* ── topo/head da aba ── */
+.fd-scope .fd-head{
+  padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface);
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+}
+.fd-scope .fd-head-title{ font-size:15px; font-weight:700; display:flex; align-items:center; gap:9px; }
+.fd-scope .fd-logo-mark{ width:28px; height:28px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; box-shadow:0 4px 14px rgba(79,124,255,.3); flex-shrink:0; }
+
+/* ── contact-list ── */
+.fd-scope .contact-list{ width:280px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+.fd-scope .list-header{ padding:12px 10px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.fd-scope .list-title{ font-size:14px; font-weight:600; display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; }
+.fd-scope .contacts-scroll{ flex:1; overflow-y:auto; padding:5px; }
+.fd-scope .contact-card{ padding:8px; border-radius:var(--radius-sm); cursor:pointer; display:flex; gap:8px; align-items:flex-start; transition:background .1s; border:1px solid transparent; }
+.fd-scope .contact-card:hover{ background:var(--surface2); }
+.fd-scope .contact-card.active{ background:rgba(79,124,255,.08); border-color:rgba(79,124,255,.2); }
+.fd-scope .contact-avatar{ width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0; position:relative; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); }
+.fd-scope .channel-dot{ position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-radius:50%; border:2px solid var(--surface); font-size:7px; display:flex; align-items:center; justify-content:center; background:var(--wa); }
+.fd-scope .contact-info{ flex:1; min-width:0; }
+.fd-scope .contact-name{ font-size:12px; font-weight:500; margin-bottom:2px; display:flex; align-items:center; gap:6px; }
+.fd-scope .contact-preview{ font-size:11px; color:var(--text3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fd-scope .contact-badge{ background:var(--accent); color:#fff; font-size:9px; font-weight:700; padding:1px 5px; border-radius:10px; }
+.fd-scope .fd-empty{ padding:16px 10px; color:var(--text3); font-size:12px; line-height:1.6; }
+
+/* ── chat area ── */
+.fd-scope .chat-area{ flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.fd-scope .chat-header{ padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:9px; flex-shrink:0; }
+.fd-scope .contact-avatar-lg{ width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); }
+.fd-scope .chat-contact-name{ font-size:13px; font-weight:600; }
+.fd-scope .chat-contact-sub{ font-size:11px; color:var(--text3); display:flex; align-items:center; gap:4px; margin-top:1px; }
+.fd-scope .channel-label{ font-size:11px; font-weight:600; color:var(--wa); }
+.fd-scope .dot-sep{ color:var(--text3); }
+.fd-scope .header-actions{ display:flex; gap:6px; margin-left:auto; }
+
+.fd-scope .messages-container{ flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:9px; background:var(--bg); }
+.fd-scope .msg-wrap{ display:flex; gap:7px; max-width:72%; }
+.fd-scope .msg-wrap.out{ align-self:flex-end; flex-direction:row-reverse; }
+.fd-scope .msg-avatar-sm{ width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:600; flex-shrink:0; align-self:flex-end; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent2)); }
+.fd-scope .msg-bubble{ padding:8px 12px; border-radius:13px; font-size:13px; line-height:1.5; }
+.fd-scope .msg-wrap:not(.out) .msg-bubble{ background:var(--surface2); border-bottom-left-radius:3px; }
+.fd-scope .msg-wrap.out .msg-bubble{ background:rgba(79,124,255,.18); border:1px solid rgba(79,124,255,.2); border-bottom-right-radius:3px; }
+.fd-scope .msg-time{ font-size:10px; color:var(--text3); margin-top:2px; display:flex; align-items:center; gap:3px; }
+.fd-scope .msg-wrap.out .msg-time{ justify-content:flex-end; }
+
+.fd-scope .input-area{ border-top:1px solid var(--border); background:var(--surface); padding:9px 12px; flex-shrink:0; }
+.fd-scope .input-row{ display:flex; gap:6px; align-items:flex-end; }
+.fd-scope .msg-input{ flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 11px; color:var(--text); font-family:inherit; font-size:13px; outline:none; resize:none; line-height:1.5; min-height:34px; max-height:100px; transition:border-color .15s; }
+.fd-scope .msg-input:focus{ border-color:var(--accent); }
+.fd-scope .msg-input::placeholder{ color:var(--text3); }
+.fd-scope .send-btn{ width:34px; height:34px; background:var(--accent); border:none; border-radius:var(--radius-sm); color:#fff; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+.fd-scope .send-btn:hover{ background:#3d6aee; }
+.fd-scope .send-btn:disabled{ opacity:.4; cursor:default; }
+
+/* ── botões / status pill / badge genérico ── */
+.fd-scope .btn{ padding:7px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface2); color:var(--text); font-family:inherit; font-size:12.5px; cursor:pointer; font-weight:500; display:inline-flex; align-items:center; gap:5px; transition:all .15s; white-space:nowrap; }
+.fd-scope .btn:hover{ border-color:var(--border2); background:var(--surface3); }
+.fd-scope .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.fd-scope .btn.primary:hover{ background:#3d6aee; border-color:#3d6aee; }
+.fd-scope .btn.danger{ background:rgba(239,68,68,.1); border-color:rgba(239,68,68,.3); color:var(--red); }
+.fd-scope .btn.danger:hover{ background:rgba(239,68,68,.2); }
+.fd-scope .btn.sm{ padding:4px 10px; font-size:11px; }
+.fd-scope .btn:disabled{ opacity:.5; cursor:default; transform:none !important; box-shadow:none !important; }
+.fd-scope .status-pill{ font-size:10px; font-weight:600; padding:3px 8px; border-radius:20px; display:inline-flex; align-items:center; gap:5px; }
+.fd-scope .status-pill .dot{ width:6px; height:6px; border-radius:50%; }
+.fd-scope .status-pill.active{ background:rgba(34,197,94,.12); color:var(--green); }
+.fd-scope .status-pill.active .dot{ background:var(--green); box-shadow:0 0 0 3px rgba(34,197,94,.2); }
+.fd-scope .status-pill.pending{ background:rgba(245,158,11,.12); color:var(--yellow); }
+.fd-scope .status-pill.pending .dot{ background:var(--yellow); box-shadow:0 0 0 3px rgba(245,158,11,.2); }
+.fd-scope .status-pill.off{ background:rgba(239,68,68,.12); color:var(--red); }
+.fd-scope .status-pill.off .dot{ background:var(--red); box-shadow:0 0 0 3px rgba(239,68,68,.2); }
+
+/* ── tela de conectar (estilo onboard do FlowDesk) ── */
+.fd-scope .fd-connect-wrap{ flex:1; display:flex; align-items:center; justify-content:center; background:var(--bg); background-image:radial-gradient(circle at 20% 80%,rgba(79,124,255,.06) 0%,transparent 50%), radial-gradient(circle at 80% 20%,rgba(108,79,255,.06) 0%,transparent 50%); }
+.fd-scope .onboard-card{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:30px; width:400px; max-width:92vw; text-align:center; box-shadow:var(--shadow-md); }
+.fd-scope .onboard-card-title{ font-size:17px; font-weight:700; margin-bottom:6px; }
+.fd-scope .onboard-card-sub{ font-size:13px; color:var(--text3); margin-bottom:20px; line-height:1.6; }
+.fd-scope .fd-qr-box{ width:220px; height:220px; margin:0 auto 18px; border-radius:12px; background:#fff; padding:10px; box-shadow:var(--shadow-sm); }
+.fd-scope .fd-qr-box img{ width:100%; height:100%; object-fit:contain; }
+.fd-scope .fd-error{ margin:0 0 14px; padding:9px 12px; border-radius:var(--radius-sm); background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); color:var(--red); font-size:12px; text-align:left; }
+.fd-scope .fd-setup ol{ text-align:left; margin:14px 0; padding-left:20px; font-size:12.5px; color:var(--text2); line-height:1.8; }
+.fd-scope .fd-setup code{ background:var(--surface2); border:1px solid var(--border); padding:1px 6px; border-radius:4px; font-family:'DM Mono',monospace; font-size:11.5px; color:var(--accent); }
