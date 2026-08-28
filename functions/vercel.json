@@ -1,5 +1,8 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    {
+      "source": "/api/:match*",
+      "destination": "https://evolution-api-7jzj.onrender.com/:match*"
+    }
   ]
 }
