@@ -25,7 +25,7 @@ if (FIREBASE_CONFIGURED) {
 
 // URL base das suas Functions — ajuste a região/projeto.
 // Ex: "https://us-central1-meu-projeto.cloudfunctions.net/api"
-const API_BASE = "https://workspace-flowdesk.vercel.app/api";
+const API_BASE = "https://workspace-flowdesk.vercel.app";
 
 async function apiCall(path, method = "GET", body) {
   const user = auth && auth.currentUser;
