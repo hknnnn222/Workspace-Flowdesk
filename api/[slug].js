@@ -239,7 +239,7 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────
 // 4) STATUS DA CONEXÃO
 // ------------------------------------------------------------------
-app.get("/api/whatsapp/status/:tenantId", requireAuth, async (req, res) => {
+app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
   try {
     const { tenantId } = req.params;
     const connectionState = await evo.getConnectionState(tenantId);
