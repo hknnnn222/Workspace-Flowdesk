@@ -193,32 +193,39 @@ app.post("/api/send", requireAuth, async (req, res) => {
 app.post("/api/whatsapp/connect", async (req, res) => {
   try {
     const { tenantId } = req.body;
-    if (!tenantId) return res.status(400).json({ error: "tenantId obrigatório" });
+    if (!tenantId) {
+      return res.status(400).json({ ok: false, error: "tenantId obrigatório" });
+    }
 
     const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
     const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
 
+    // Tenta criar a instância na Evolution API
     try {
       await evo.createInstance(tenantId, webhookUrl);
     } catch (e) {
-      console.log("Instância já existe ou aviso da Evolution API:", e?.message);
+      console.log("Aviso createInstance:", e?.message || e);
     }
 
+    // Busca o QR Code da Evolution
     const qrData = await evo.getQrCode(tenantId);
     let rawBase64 = qrData?.base64 || qrData?.qrcode?.base64 || qrData?.code || "";
 
-    if (rawBase64.includes(",")) {
+    if (rawBase64 && rawBase64.includes(",")) {
       rawBase64 = rawBase64.split(",")[1];
     }
 
-    try {
-      const instanceRef = db.collection("instances").doc(tenantId);
-      await instanceRef.set(
-        { status: "qrcode", qrcode: rawBase64, updatedAt: new Date().toISOString() },
-        { merge: true }
-      );
-    } catch (dbErr) {
-      console.warn("Aviso ao salvar no Firestore:", dbErr?.message);
+    // Tenta salvar no Firestore sem derrubar a API em caso de erro no DB
+    if (typeof db !== "undefined" && db) {
+      try {
+        const instanceRef = db.collection("instances").doc(tenantId);
+        await instanceRef.set(
+          { status: "qrcode", qrcode: rawBase64, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      } catch (dbErr) {
+        console.warn("Erro ao salvar Firestore (ignorado):", dbErr?.message);
+      }
     }
 
     return res.json({
@@ -227,8 +234,11 @@ app.post("/api/whatsapp/connect", async (req, res) => {
       pairingCode: qrData?.pairingCode || null,
     });
   } catch (err) {
-    console.error("Erro fatal ao gerar QR code:", err);
-    return res.status(500).json({ ok: false, error: err?.response?.data || String(err) });
+    console.error("Erro na rota whatsapp/connect:", err?.response?.data || err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err?.response?.data?.message || err?.message || String(err) 
+    });
   }
 });
 
