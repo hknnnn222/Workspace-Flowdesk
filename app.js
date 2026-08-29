@@ -1636,18 +1636,18 @@ function BotModule({workspaceId, workspaceName, userId}){
     return ()=> unsub && unsub();
   },[configured, sessionReady, workspaceId, selectedId]);
 
-  async function handleConnect() {
+ async function handleConnect() {
   setActionError(null);
   setConnecting(true);
   try {
     const res = await api.connectWhatsapp(workspaceId);
     
-    // Extrai o base64 de qualquer estrutura possível da Evolution API
-    const qrCodeBase64 = res?.qrcode?.base64 || res?.qrcode || res?.base64 || res?.code || null;
-
-    if (!qrCodeBase64) {
-      throw new Error("Não foi possível obter a imagem do QR Code.");
-    }
+    const qrCodeBase64 = 
+      res?.qrcode?.base64 || 
+      res?.qrcode || 
+      res?.base64 || 
+      res?.code || 
+      "";
 
     setWaStatus({
       status: 'qrcode',

@@ -274,44 +274,64 @@ app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
 
 // 5) DESCONECTAR WHATSAPP
 // ------------------------------------------------------------------
-app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
+app.post("/api/whatsapp/connect", async (req, res) => {
   try {
     const { tenantId } = req.body;
-    await evo.deleteInstance(tenantId);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.response?.data || String(err) });
-  }
-});
-// ─────────────────────────────────────────────────────
-// 4) STATUS DA CONEXÃO
-// ------------------------------------------------------------------
-app.get("/api/whatsapp/status/:tenantId", async (req, res) => {
-  try {
-    const { tenantId } = req.params;
-    
-    // Tenta buscar o status na Evolution API usando getStatus
-    let state = "close";
+    if (!tenantId) {
+      return res.status(400).json({ ok: false, error: "tenantId obrigatório" });
+    }
+
+    const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+    const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
+
     try {
-      const result = await evo.getStatus(tenantId);
-      state = result?.instance?.state || result?.state || "close";
-    } catch (evoErr) {
-      console.warn("Evolution API não respondeu o status:", evoErr?.message);
+      await evo.createInstance(tenantId, webhookUrl);
+    } catch (e) {
+      console.log("Instância já existente ou aviso Evolution:", e?.message);
     }
 
-    const instanceRef = db.collection("instances").doc(tenantId);
+    // Busca dados do QR Code
+    const qrData = await evo.getQrCode(tenantId);
+    
+    // Mapeia todas as estruturas conhecidas da Evolution API
+    let rawBase64 = 
+      qrData?.base64 || 
+      qrData?.qrcode?.base64 || 
+      qrData?.code || 
+      qrData?.qrcode || 
+      "";
 
-    if (state === "open" || state === "CONNECTED") {
-      await instanceRef.set(
-        { status: "CONNECTED", updatedAt: new Date().toISOString() },
-        { merge: true }
-      );
+    if (typeof rawBase64 === "object" && rawBase64?.base64) {
+      rawBase64 = rawBase64.base64;
     }
 
-    res.json({ ok: true, state });
+    if (typeof rawBase64 === "string" && rawBase64.includes(",")) {
+      rawBase64 = rawBase64.split(",")[1];
+    }
+
+    // Salva estado no Firestore
+    if (typeof db !== "undefined" && db) {
+      try {
+        await db.collection("instances").doc(tenantId).set(
+          { status: "qrcode", qrcode: rawBase64, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      } catch (dbErr) {
+        console.warn("Aviso Firestore:", dbErr?.message);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      qrcode: rawBase64,
+      pairingCode: qrData?.pairingCode || null,
+    });
   } catch (err) {
-    console.error("Erro na rota de status:", err);
-    res.status(500).json({ ok: false, error: String(err) });
+    console.error("Erro na rota connect:", err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err?.response?.data || err?.message || String(err) 
+    });
   }
 });
 
