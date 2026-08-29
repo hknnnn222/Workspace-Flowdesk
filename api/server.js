@@ -71,30 +71,51 @@ app.post("/webhook/:instanceName", async (req, res) => {
 
   try {
     if (event === "messages.upsert" || event === "MESSAGES_UPSERT") {
-      await handleIncomingMessage(instanceName, body.data);
+      await withTimeout(handleIncomingMessage(instanceName, body.data), 8000, "processar mensagem");
     } else if (event === "messages.set" || event === "MESSAGES_SET") {
       // Histórico antigo chega de uma vez, como uma lista
       const list = Array.isArray(body.data) ? body.data : body.data?.messages || [];
       for (const msg of list) {
-        await handleIncomingMessage(instanceName, msg).catch((e) =>
+        await withTimeout(handleIncomingMessage(instanceName, msg), 8000, "processar mensagem do histórico").catch((e) =>
           console.error("Erro processando mensagem do histórico:", e)
         );
       }
     } else if (event === "connection.update" || event === "CONNECTION_UPDATE") {
-      await db.collection("tenants").doc(instanceName)
-        .collection("whatsapp").doc("status")
-        .set({ state: body.data?.state || "unknown", updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await withTimeout(
+        db.collection("tenants").doc(instanceName)
+          .collection("whatsapp").doc("status")
+          .set({ state: body.data?.state || "unknown", updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+        8000,
+        "gravar connection.update"
+      );
     } else if (event === "qrcode.updated" || event === "QRCODE_UPDATED") {
-      await db.collection("tenants").doc(instanceName)
-        .collection("whatsapp").doc("status")
-        .set({ qrcode: body.data?.qrcode?.base64 || null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await withTimeout(
+        db.collection("tenants").doc(instanceName)
+          .collection("whatsapp").doc("status")
+          .set({ qrcode: body.data?.qrcode?.base64 || null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+        8000,
+        "gravar qrcode.updated"
+      );
     }
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error("Erro no webhook:", err);
-    res.status(500).json({ ok: false, error: String(err) });
+    // Mesmo em erro/timeout, responde rápido — assim a Evolution não fica reenviando
+    // o mesmo evento em loop achando que a chamada travou.
+    res.status(200).json({ ok: false, error: String(err) });
   }
 });
+
+// Limita quanto tempo uma promise (ex: gravação no Firestore) pode demorar.
+// Se estourar, rejeita ao invés de deixar a request pendurada até o limite da function.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout (${ms}ms) ao ${label}`)), ms)
+    ),
+  ]);
+}
 
 async function handleIncomingMessage(tenantId, data) {
   if (!data || !data.key) return;
