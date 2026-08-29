@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/webhook/:path*", "destination": "/api/:path*" }
+    { "source": "/api/:path*", "destination": "/api/server" },
+    { "source": "/webhook/:path*", "destination": "/api/server" }
   ],
   "headers": [
     {
