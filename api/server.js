@@ -231,10 +231,20 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
     const baseUrl = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
     const webhookUrl = `${baseUrl}/webhook/${tenantId}`;
 
+    let instanceExists = false;
     try {
-      await evo.createInstance(tenantId, webhookUrl);
+      await evo.getStatus(tenantId);
+      instanceExists = true; // se não deu erro, a instância já existe — não precisa criar de novo
     } catch (e) {
-      console.log("Aviso createInstance (instância já deve existir):", e?.response?.data || e?.message);
+      instanceExists = false;
+    }
+
+    if (!instanceExists) {
+      try {
+        await evo.createInstance(tenantId, webhookUrl);
+      } catch (e) {
+        console.log("Aviso createInstance (instância já deve existir):", e?.response?.data || e?.message);
+      }
     }
 
     const qrData = await evo.getQrCode(tenantId);
