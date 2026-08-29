@@ -24,7 +24,7 @@ function client() {
   return axios.create({
     baseURL: url,
     headers: { apikey, "Content-Type": "application/json" },
-    timeout: 20000, // 20s por chamada — assim createInstance + getQrCode juntos não estouram o limite de 60s da function na Vercel
+    timeout: 12000, // 12s por chamada
   });
 }
 
