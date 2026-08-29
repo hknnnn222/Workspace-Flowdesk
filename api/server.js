@@ -102,6 +102,7 @@ async function handleIncomingMessage(tenantId, data) {
   const phone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
   const fromMe = !!data.key.fromMe;
   const pushName = data.pushName || phone;
+  const messageDocId = data.key.id || null; // ID da mensagem no WhatsApp — usamos como ID do doc pra evitar duplicar
 
   const text =
     data.message?.conversation ||
@@ -129,6 +130,7 @@ async function handleIncomingMessage(tenantId, data) {
   const contactsRef = tenantRef.collection("contacts");
   const existing = await contactsRef.where("phone", "==", phone).limit(1).get();
   let contactId;
+
   if (existing.empty) {
     const newDoc = await contactsRef.add({
       name: pushName,
@@ -144,12 +146,24 @@ async function handleIncomingMessage(tenantId, data) {
     contactId = newDoc.id;
   } else {
     contactId = existing.docs[0].id;
+  }
+
+  const messagesRef = contactsRef.doc(contactId).collection("messages");
+
+  // Se já processamos essa mensagem antes (mesmo messageId — ex: reconexão
+  // reenviando o histórico), não duplica nem reprocessa.
+  if (messageDocId) {
+    const already = await messagesRef.doc(messageDocId).get();
+    if (already.exists) return;
+  }
+
+  // Se o contato já existia, atualiza preview/lastMessageAt/unread.
+  // Só mexe no preview/lastMessageAt se essa mensagem for mais recente que a
+  // última que já tínhamos — assim, histórico chegando fora de ordem não
+  // bagunça a prévia/ordenação da lista de conversas.
+  if (!existing.empty) {
     const contactSnap = await contactsRef.doc(contactId).get();
     const currentLastMessageAt = contactSnap.data()?.lastMessageAt;
-
-    // Só atualiza o "preview"/"lastMessageAt" do contato se essa mensagem for
-    // mais recente que a última que já tínhamos — assim, mensagens antigas
-    // chegando fora de ordem não bagunçam a prévia/ordenação da lista.
     const isNewer =
       !currentLastMessageAt ||
       !msgDate ||
@@ -161,13 +175,19 @@ async function handleIncomingMessage(tenantId, data) {
     });
   }
 
-  await contactsRef.doc(contactId).collection("messages").add({
+  const messageData = {
     from: fromMe ? "agent" : "client",
     text,
     raw: data.message || null,
     messageId: data.key.id,
     timestamp: messageTimestamp,
-  });
+  };
+
+  if (messageDocId) {
+    await messagesRef.doc(messageDocId).set(messageData, { merge: true });
+  } else {
+    await messagesRef.add(messageData);
+  }
 }
 
 // 2) ENVIAR MENSAGEM
@@ -269,6 +289,22 @@ app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
+  }
+});
+
+// 6) ROTA TEMPORÁRIA — apaga a coleção "contacts" (e mensagens dentro) de um
+// tenant via Admin SDK, já que apagar pelo Firestore Console às vezes falha
+// em coleções com muitas subcoleções. REMOVA ESSA ROTA depois de usar.
+app.post("/api/admin/wipe-contacts", requireAuth, async (req, res) => {
+  try {
+    const { tenantId } = req.body;
+    if (!tenantId) return res.status(400).json({ ok: false, error: "tenantId obrigatório" });
+    const contactsRef = db.collection("tenants").doc(tenantId).collection("contacts");
+    await db.recursiveDelete(contactsRef);
+    res.json({ ok: true, message: `Coleção contacts do tenant ${tenantId} apagada.` });
+  } catch (err) {
+    console.error("Erro ao apagar contacts:", err);
+    res.status(500).json({ ok: false, error: String(err) });
   }
 });
 
