@@ -87,12 +87,22 @@ window.FlowDeskAPI = {
         (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
         (err) => console.error("listenContacts:", err)
       ),
-  // Escuta mensagens de um contato em tempo real
-  listenMessages: (tenantId, contactId, callback) =>
+  // Escuta em tempo real só as últimas `limit` mensagens (padrão: 30).
+  // Retorna também um callback com a lista já na ordem certa (mais antiga primeiro).
+  listenMessages: (tenantId, contactId, limit, callback) =>
     db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
-      .collection("messages").orderBy("timestamp", "asc")
+      .collection("messages").orderBy("timestamp", "desc").limit(limit || 30)
       .onSnapshot(
-        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse()),
         (err) => console.error("listenMessages:", err)
       ),
+  // Busca (uma vez só, sem tempo real) até `limit` mensagens mais antigas que `beforeTimestamp`.
+  // Usado quando o usuário rola pra cima procurando histórico.
+  loadOlderMessages: (tenantId, contactId, beforeTimestamp, limit) =>
+    db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
+      .collection("messages").orderBy("timestamp", "desc")
+      .startAfter(beforeTimestamp)
+      .limit(limit || 30)
+      .get()
+      .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse()),
 };

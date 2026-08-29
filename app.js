@@ -1,4 +1,4 @@
-const {useState, useMemo, useEffect} = React;
+const {useState, useMemo, useEffect, useRef} = React;
 
 /* =========================================================================
    MODELO DE DADOS (mock em memória, respeitando o desenho relacional)
@@ -1571,9 +1571,14 @@ function BotModule({workspaceId, workspaceName, userId}){
 
   const [contacts, setContacts] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [recentMessages, setRecentMessages] = useState([]); // últimas N, em tempo real
+  const [olderMessages, setOlderMessages] = useState([]);   // histórico carregado ao rolar pra cima
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const messagesContainerRef = useRef(null);
+  const MESSAGES_PAGE_SIZE = 30;
 
   // 1) Autentica (login anônimo) e "carimba" o tenantId (empresa atual) no token,
   //    para as Firestore Rules liberarem só os dados dessa empresa.
@@ -1629,12 +1634,57 @@ function BotModule({workspaceId, workspaceName, userId}){
     return ()=> unsub && unsub();
   },[configured, sessionReady, workspaceId]);
 
-  // 4) Escuta as mensagens do contato selecionado
+  // 4) Escuta em tempo real só as últimas mensagens do contato selecionado
   useEffect(()=>{
-    if(!configured || !sessionReady || !workspaceId || !selectedId) { setMessages([]); return; }
-    const unsub = api.listenMessages(workspaceId, selectedId, (list)=> setMessages(list));
+    if(!configured || !sessionReady || !workspaceId || !selectedId) {
+      setRecentMessages([]); setOlderMessages([]); setHasMoreMessages(true);
+      return;
+    }
+    setOlderMessages([]); setHasMoreMessages(true);
+    const unsub = api.listenMessages(workspaceId, selectedId, MESSAGES_PAGE_SIZE, (list)=> setRecentMessages(list));
     return ()=> unsub && unsub();
   },[configured, sessionReady, workspaceId, selectedId]);
+
+  // Junta o histórico carregado (rolando pra cima) com as mensagens recentes (tempo real),
+  // sem duplicar caso alguma já esteja nos dois grupos.
+  const messages = useMemo(()=>{
+    const seen = new Set(recentMessages.map(m=>m.id));
+    const filteredOlder = olderMessages.filter(m=>!seen.has(m.id));
+    return [...filteredOlder, ...recentMessages];
+  },[olderMessages, recentMessages]);
+
+  // Busca mais mensagens antigas quando o usuário rola pro topo do chat
+  async function loadMoreMessages(){
+    if(loadingMore || !hasMoreMessages) return;
+    const oldest = olderMessages[0] || recentMessages[0];
+    if(!oldest || !oldest.timestamp){ setHasMoreMessages(false); return; }
+    setLoadingMore(true);
+    const el = messagesContainerRef.current;
+    const prevScrollHeight = el ? el.scrollHeight : 0;
+    try{
+      const older = await api.loadOlderMessages(workspaceId, selectedId, oldest.timestamp, MESSAGES_PAGE_SIZE);
+      if(!older.length || older.length < MESSAGES_PAGE_SIZE) setHasMoreMessages(false);
+      if(older.length){
+        setOlderMessages(prev=>[...older, ...prev]);
+        // mantém a posição do scroll (senão a tela "pula" quando insere mensagens acima)
+        requestAnimationFrame(()=>{
+          if(messagesContainerRef.current){
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight - prevScrollHeight;
+          }
+        });
+      }
+    }catch(err){
+      console.error("Erro ao carregar mensagens antigas:", err);
+    }finally{
+      setLoadingMore(false);
+    }
+  }
+
+  function handleMessagesScroll(e){
+    if(e.target.scrollTop < 100 && hasMoreMessages && !loadingMore){
+      loadMoreMessages();
+    }
+  }
 
  async function handleConnect() {
   setActionError(null);
@@ -1865,7 +1915,12 @@ function BotModule({workspaceId, workspaceName, userId}){
                     </div>
                   </div>
                 </div>
-                <div className="messages-container">
+                <div className="messages-container" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
+                  {loadingMore && (
+                    <div style={{textAlign:'center', padding:'6px', fontSize:'11px', color:'var(--text3)'}}>
+                      Carregando mensagens antigas…
+                    </div>
+                  )}
                   {messages.map((m,i)=>(
                     <div key={m.id||i} className={"msg-wrap"+(m.from==='agent'?' out':'')}>
                       <div className="msg-avatar-sm">{m.from==='agent' ? (userId||'').slice(0,2).toUpperCase() : (contacts.find(c=>c.id===selectedId)?.name||'?').slice(0,2).toUpperCase()}</div>

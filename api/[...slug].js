@@ -61,11 +61,18 @@ app.post("/webhook/:instanceName", async (req, res) => {
   const { instanceName } = req.params;
   const body = req.body || {};
   const event = body.event;
-console.log("WEBHOOK EVENT:", event, JSON.stringify(body).slice(0, 500));
 
   try {
     if (event === "messages.upsert" || event === "MESSAGES_UPSERT") {
       await handleIncomingMessage(instanceName, body.data);
+    } else if (event === "messages.set" || event === "MESSAGES_SET") {
+      // Histórico antigo chega de uma vez, como uma lista
+      const list = Array.isArray(body.data) ? body.data : body.data?.messages || [];
+      for (const msg of list) {
+        await handleIncomingMessage(instanceName, msg).catch((e) =>
+          console.error("Erro processando mensagem do histórico:", e)
+        );
+      }
     } else if (event === "connection.update" || event === "CONNECTION_UPDATE") {
       await db.collection("tenants").doc(instanceName)
         .collection("whatsapp").doc("status")

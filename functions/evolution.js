@@ -38,11 +38,12 @@ async function createInstance(instanceName, webhookUrl) {
     instanceName,
     qrcode: true,
     integration: "WHATSAPP-BAILEYS",
+    syncFullHistory: true, // pede pro WhatsApp mandar o historico de conversas antigas
     webhook: {
       url: webhookUrl,
       byEvents: false,
       base64: true,
-      events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+      events: ["MESSAGES_UPSERT", "MESSAGES_SET", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
     },
   });
   return data;
