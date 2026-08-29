@@ -1603,23 +1603,20 @@ function BotModule({workspaceId, workspaceName, userId}){
   });
 
   // 2. Checagem ativa (Polling) a cada 3s caso o webhook não dispare
-  const interval = setInterval(async () => {
-    if (waStatus?.status !== "CONNECTED") {
-      try {
-        const res = await fetch(`/api/whatsapp/status/${workspaceId}`);
-        const json = await res.json();
-        
-        // Se a Evolution API responder que a instância abriu/conectou
-        if (json.state === "open" || json.status === "CONNECTED") {
-          setWaStatus({ status: "CONNECTED" });
-          clearInterval(interval);
-        }
-      } catch (e) {
-        console.error("Erro na checagem de status:", e);
+  // 2. Checagem ativa (Polling) a cada 3s caso o webhook não dispare
+const interval = setInterval(async () => {
+  if (waStatus?.status !== "CONNECTED") {
+    try {
+      const json = await api.whatsappStatus(workspaceId); // já manda o Bearer token
+      if (json.status?.state === "open" || json.status === "CONNECTED") {
+        setWaStatus({ status: "CONNECTED" });
+        clearInterval(interval);
       }
+    } catch (e) {
+      console.error("Erro na checagem de status:", e);
     }
-  }, 3000);
-
+  }
+}, 3000);
   return () => {
     unsub && unsub();
     clearInterval(interval);

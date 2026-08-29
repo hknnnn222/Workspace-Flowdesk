@@ -66,6 +66,9 @@ app.post("/webhook/:instanceName", async (req, res) => {
   const body = req.body || {};
   const event = body.event;
 
+  // LOG TEMPORÁRIO — dá pra remover depois que descobrirmos o nome certo do evento de histórico
+  console.log("WEBHOOK EVENT:", instanceName, event);
+
   try {
     if (event === "messages.upsert" || event === "MESSAGES_UPSERT") {
       await handleIncomingMessage(instanceName, body.data);
