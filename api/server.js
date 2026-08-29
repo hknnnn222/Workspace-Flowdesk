@@ -109,6 +109,22 @@ async function handleIncomingMessage(tenantId, data) {
     data.message?.imageMessage?.caption ||
     "[mídia]";
 
+  // Usa o horário REAL da mensagem (vindo do WhatsApp) em vez do horário
+  // em que ela chegou no nosso webhook — essencial pro histórico antigo
+  // não aparecer todo com o horário de "agora".
+  // data.messageTimestamp vem em segundos (unix); às vezes vem como string ou objeto { low, high }.
+  let msgDate = null;
+  const rawTs = data.messageTimestamp;
+  if (rawTs != null) {
+    const seconds = typeof rawTs === "object" ? Number(rawTs.low) : Number(rawTs);
+    if (!Number.isNaN(seconds) && seconds > 0) {
+      msgDate = new Date(seconds * 1000);
+    }
+  }
+  const messageTimestamp = msgDate
+    ? admin.firestore.Timestamp.fromDate(msgDate)
+    : admin.firestore.FieldValue.serverTimestamp();
+
   const tenantRef = db.collection("tenants").doc(tenantId);
   const contactsRef = tenantRef.collection("contacts");
   const existing = await contactsRef.where("phone", "==", phone).limit(1).get();
@@ -123,14 +139,24 @@ async function handleIncomingMessage(tenantId, data) {
       preview: text,
       tags: [],
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastMessageAt: messageTimestamp,
     });
     contactId = newDoc.id;
   } else {
     contactId = existing.docs[0].id;
+    const contactSnap = await contactsRef.doc(contactId).get();
+    const currentLastMessageAt = contactSnap.data()?.lastMessageAt;
+
+    // Só atualiza o "preview"/"lastMessageAt" do contato se essa mensagem for
+    // mais recente que a última que já tínhamos — assim, mensagens antigas
+    // chegando fora de ordem não bagunçam a prévia/ordenação da lista.
+    const isNewer =
+      !currentLastMessageAt ||
+      !msgDate ||
+      msgDate.getTime() >= currentLastMessageAt.toDate().getTime();
+
     await contactsRef.doc(contactId).update({
-      preview: text,
-      lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(isNewer ? { preview: text, lastMessageAt: messageTimestamp } : {}),
       unread: fromMe ? 0 : admin.firestore.FieldValue.increment(1),
     });
   }
@@ -140,7 +166,7 @@ async function handleIncomingMessage(tenantId, data) {
     text,
     raw: data.message || null,
     messageId: data.key.id,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    timestamp: messageTimestamp,
   });
 }
 
