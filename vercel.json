@@ -1,5 +1,19 @@
 {
   "rewrites": [
     { "source": "/webhook/:path*", "destination": "/api/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/webhook/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
+    }
   ]
 }

@@ -26,6 +26,10 @@ const db = admin.firestore();
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "15mb" }));
+app.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, must-revalidate");
+  next();
+});
 
 async function requireAuth(req, res, next) {
   try {
