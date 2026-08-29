@@ -61,6 +61,7 @@ app.post("/webhook/:instanceName", async (req, res) => {
   const { instanceName } = req.params;
   const body = req.body || {};
   const event = body.event;
+console.log("WEBHOOK EVENT:", event, JSON.stringify(body).slice(0, 500));
 
   try {
     if (event === "messages.upsert" || event === "MESSAGES_UPSERT") {
