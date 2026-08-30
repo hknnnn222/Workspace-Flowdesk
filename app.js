@@ -1570,6 +1570,10 @@ function BotModule({workspaceId, workspaceName, userId}){
   const [actionError, setActionError] = useState(null);
 
   const [contacts, setContacts] = useState([]);
+  const [hasMoreContacts, setHasMoreContacts] = useState(true);
+  const [loadingMoreContacts, setLoadingMoreContacts] = useState(false);
+  const contactsScrollRef = useRef(null);
+  const CONTACTS_PAGE_SIZE = 30;
   const [selectedId, setSelectedId] = useState(null);
   const [recentMessages, setRecentMessages] = useState([]); // últimas N, em tempo real
   const [olderMessages, setOlderMessages] = useState([]);   // histórico carregado ao rolar pra cima
@@ -1603,33 +1607,65 @@ function BotModule({workspaceId, workspaceName, userId}){
   });
 
   // 2. Checagem ativa (Polling) a cada 3s caso o webhook não dispare
-  // 2. Checagem ativa (Polling) a cada 3s caso o webhook não dispare
-const interval = setInterval(async () => {
-  if (waStatus?.status !== "CONNECTED") {
-    try {
-      const json = await api.whatsappStatus(workspaceId); // já manda o Bearer token
-      if (json.status?.state === "open" || json.status === "CONNECTED") {
-        setWaStatus({ status: "CONNECTED" });
-        clearInterval(interval);
+  const interval = setInterval(async () => {
+    if (waStatus?.status !== "CONNECTED") {
+      try {
+        const json = await api.whatsappStatus(workspaceId); // usa o helper que já envia o token de autenticação
+
+        // Se a Evolution API responder que a instância abriu/conectou
+        if (json.status?.state === "open" || json.status === "CONNECTED") {
+          setWaStatus({ status: "CONNECTED" });
+          clearInterval(interval);
+        }
+      } catch (e) {
+        console.error("Erro na checagem de status:", e);
       }
-    } catch (e) {
-      console.error("Erro na checagem de status:", e);
     }
-  }
-}, 3000);
+  }, 3000);
+
   return () => {
     unsub && unsub();
     clearInterval(interval);
   };
 }, [configured, sessionReady, workspaceId, waStatus?.status]);
 
-  // 3) Escuta contatos em tempo real (conversas recebidas via WhatsApp)
+  // 3) Escuta contatos em tempo real (só os mais recentes — o resto carrega
+  //    sob demanda conforme o usuário rola a lista pra baixo)
   useEffect(()=>{
     if(!configured || !sessionReady || !workspaceId) return;
-    setContacts([]); setSelectedId(null);
-    const unsub = api.listenContacts(workspaceId, (list)=> setContacts(list));
+    setContacts([]); setSelectedId(null); setHasMoreContacts(true);
+    const unsub = api.listenContacts(workspaceId, CONTACTS_PAGE_SIZE, (list)=> setContacts(list));
     return ()=> unsub && unsub();
   },[configured, sessionReady, workspaceId]);
+
+  // Busca mais contatos antigos quando o usuário rola pro final da lista
+  async function loadMoreContacts(){
+    if(loadingMoreContacts || !hasMoreContacts) return;
+    const last = contacts[contacts.length-1];
+    if(!last){ setHasMoreContacts(false); return; }
+    setLoadingMoreContacts(true);
+    try{
+      const more = await api.loadMoreContacts(workspaceId, last, CONTACTS_PAGE_SIZE);
+      if(!more.length || more.length < CONTACTS_PAGE_SIZE) setHasMoreContacts(false);
+      if(more.length){
+        setContacts(prev=>{
+          const existingIds = new Set(prev.map(c=>c.id));
+          return [...prev, ...more.filter(c=>!existingIds.has(c.id))];
+        });
+      }
+    }catch(err){
+      console.error("Erro ao carregar mais contatos:", err);
+    }finally{
+      setLoadingMoreContacts(false);
+    }
+  }
+
+  function handleContactsScroll(e){
+    const el = e.target;
+    if(el.scrollHeight - el.scrollTop - el.clientHeight < 100 && hasMoreContacts && !loadingMoreContacts){
+      loadMoreContacts();
+    }
+  }
 
   // 4) Escuta em tempo real só as últimas mensagens do contato selecionado
   useEffect(()=>{
@@ -1875,7 +1911,7 @@ const interval = setInterval(async () => {
                 <button className="btn danger sm" onClick={handleDisconnect} title="Desconectar este número">Desconectar</button>
               </div>
             </div>
-            <div className="contacts-scroll">
+            <div className="contacts-scroll" ref={contactsScrollRef} onScroll={handleContactsScroll}>
               {actionError && <div className="fd-error">{actionError}</div>}
               {contacts.length===0 && <div className="fd-empty">Nenhuma conversa ainda. Assim que alguém escrever para o número conectado, aparece aqui.</div>}
               {contacts.map(c=>(
@@ -1893,6 +1929,9 @@ const interval = setInterval(async () => {
                   </div>
                 </div>
               ))}
+              {loadingMoreContacts && (
+                <div style={{textAlign:'center', padding:'10px', fontSize:'11px', color:'var(--text3)'}}>Carregando mais conversas...</div>
+              )}
             </div>
           </aside>
 

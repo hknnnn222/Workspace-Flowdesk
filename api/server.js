@@ -272,9 +272,13 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
       rawBase64 = rawBase64.split(",")[1];
     }
 
-    await db.collection("tenants").doc(tenantId)
-      .collection("whatsapp").doc("status")
-      .set({ state: "qrcode", qrcode: rawBase64, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    withTimeout(
+      db.collection("tenants").doc(tenantId)
+        .collection("whatsapp").doc("status")
+        .set({ state: "qrcode", qrcode: rawBase64, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+      8000,
+      "gravar status do QR code"
+    ).catch((e) => console.error("Erro ao gravar status do QR code (não bloqueante):", e));
 
     return res.json({
       ok: true,

@@ -79,14 +79,27 @@ window.FlowDeskAPI = {
         (snap) => callback(snap.exists ? snap.data() : null),
         (err) => console.error("listenWhatsappStatus:", err)
       ),
-  // Escuta contatos em tempo real
-  listenContacts: (tenantId, callback) =>
+  // Escuta em tempo real só os primeiros `limit` contatos (padrão: 30),
+  // ordenados pela conversa mais recente. Evita carregar TODOS os contatos
+  // de uma vez (o que gastaria 1 leitura por contato, toda vez).
+  listenContacts: (tenantId, limit, callback) =>
     db.collection("tenants").doc(tenantId).collection("contacts")
       .orderBy("lastMessageAt", "desc")
+      .limit(limit || 30)
       .onSnapshot(
         (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
         (err) => console.error("listenContacts:", err)
       ),
+  // Busca (uma vez só, sem tempo real) mais `limit` contatos mais antigos
+  // que `afterContact` (o último item que já está na tela). Usado quando o
+  // usuário rola pra baixo na lista de conversas procurando mais contatos.
+  loadMoreContacts: (tenantId, afterContact, limit) =>
+    db.collection("tenants").doc(tenantId).collection("contacts")
+      .orderBy("lastMessageAt", "desc")
+      .startAfter(afterContact.lastMessageAt || null)
+      .limit(limit || 30)
+      .get()
+      .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
   // Escuta em tempo real só as últimas `limit` mensagens (padrão: 30).
   // Retorna também um callback com a lista já na ordem certa (mais antiga primeiro).
   listenMessages: (tenantId, contactId, limit, callback) =>
