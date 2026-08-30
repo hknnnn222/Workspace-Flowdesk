@@ -17,9 +17,9 @@ const INITIAL_WORKSPACE_MODULES = {
 };
 
 const MODULE_DEFS = [
-  {id:"crm",     icon:"📊", label:"CRM"},
-  {id:"bot",     icon:"🤖", label:"Bot de IA"},
-  {id:"landing", icon:"🌐", label:"Landing Page"},
+  {id:"crm",     icon:"", label:"CRM"},
+  {id:"bot",     icon:"", label:"Bot de IA"},
+  {id:"landing", icon:"", label:"Landing Page"},
 ];
 
 const WORKSPACE_LANDING_URL = {
