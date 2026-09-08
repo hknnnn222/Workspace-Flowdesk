@@ -311,6 +311,13 @@ app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
   try {
     const { tenantId } = req.body;
     await evo.deleteInstance(tenantId);
+    await withTimeout(
+      db.collection("tenants").doc(tenantId)
+        .collection("whatsapp").doc("status")
+        .set({ state: "close", qrcode: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+      8000,
+      "gravar status de desconexão"
+    ).catch((e) => console.error("Erro ao gravar status de desconexão (não bloqueante):", e));
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.response?.data || String(err) });
@@ -318,18 +325,57 @@ app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
 });
 
 // 6) ROTA TEMPORÁRIA — apaga a coleção "contacts" (e mensagens dentro) de um
-// tenant via Admin SDK, já que apagar pelo Firestore Console às vezes falha
-// em coleções com muitas subcoleções. REMOVA ESSA ROTA depois de usar.
+// tenant, em LOTES, um pouco de cada vez, pra nunca estourar o tempo limite
+// da function em coleções grandes. Chame repetidamente até vir "done: true".
+// REMOVA ESSA ROTA depois de usar.
 app.post("/api/admin/wipe-contacts", requireAuth, async (req, res) => {
+  const startedAt = Date.now();
+  const TIME_BUDGET_MS = 45000; // pára de apagar mais e responde antes dos 60s da function
+  let deletedContacts = 0;
+  let deletedMessages = 0;
   try {
     const { tenantId } = req.body;
     if (!tenantId) return res.status(400).json({ ok: false, error: "tenantId obrigatório" });
     const contactsRef = db.collection("tenants").doc(tenantId).collection("contacts");
-    await db.recursiveDelete(contactsRef);
-    res.json({ ok: true, message: `Coleção contacts do tenant ${tenantId} apagada.` });
+
+    let done = false;
+    while (Date.now() - startedAt < TIME_BUDGET_MS) {
+      const snap = await contactsRef.limit(10).get();
+      if (snap.empty) { done = true; break; }
+
+      for (const contactDoc of snap.docs) {
+        if (Date.now() - startedAt >= TIME_BUDGET_MS) break;
+        // Apaga as mensagens desse contato em lotes de até 400 (limite do batch é 500)
+        const messagesRef = contactDoc.ref.collection("messages");
+        let messagesDone = false;
+        while (!messagesDone && Date.now() - startedAt < TIME_BUDGET_MS) {
+          const msgSnap = await messagesRef.limit(400).get();
+          if (msgSnap.empty) { messagesDone = true; break; }
+          const batch = db.batch();
+          msgSnap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+          deletedMessages += msgSnap.size;
+          if (msgSnap.size < 400) messagesDone = true;
+        }
+        if (messagesDone) {
+          await contactDoc.ref.delete();
+          deletedContacts++;
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      done,
+      deletedContacts,
+      deletedMessages,
+      message: done
+        ? `Coleção contacts do tenant ${tenantId} totalmente apagada.`
+        : `Apagou ${deletedContacts} contato(s) e ${deletedMessages} mensagem(ns) até agora — ainda tem mais. Chame de novo pra continuar.`,
+    });
   } catch (err) {
     console.error("Erro ao apagar contacts:", err);
-    res.status(500).json({ ok: false, error: String(err) });
+    res.status(500).json({ ok: false, deletedContacts, deletedMessages, error: String(err) });
   }
 });
 
