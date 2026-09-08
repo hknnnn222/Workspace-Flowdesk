@@ -7,6 +7,11 @@ const {useState, useMemo, useEffect, useRef} = React;
 const WORKSPACES = [
   {id:"ws_atlas", name:"Atlas Distribuidora"},
   {id:"ws_nortex", name:"Nortex Engenharia"},
+  {id:"ws_atlas_teste", name:"Atlas Distribuidora (teste - dados limpos)"}, // TEMPORÁRIO — remova depois que limpar o ws_atlas de verdade
+  // Pra adicionar uma empresa nova no futuro, só é preciso incluir ela aqui.
+  // O WhatsApp/Bot de IA dela já nasce isolado automaticamente (Firestore e
+  // Evolution API usam esse "id" como identificador único de cada empresa),
+  // sem precisar de nenhuma configuração extra em outro arquivo.
 ];
 
 // módulos contratados por workspace — controla quais abas aparecem no header
@@ -14,12 +19,13 @@ const WORKSPACES = [
 const INITIAL_WORKSPACE_MODULES = {
   ws_atlas:  ["crm", "bot", "landing"],
   ws_nortex: ["crm"],
+  ws_atlas_teste: ["bot"], // TEMPORÁRIO — só a aba do Bot de IA, pra testar limpo
 };
 
 const MODULE_DEFS = [
-  {id:"crm",     icon:"", label:"CRM"},
-  {id:"bot",     icon:"", label:"Bot de IA"},
-  {id:"landing", icon:"", label:"Landing Page"},
+  {id:"crm",     icon:"📊", label:"CRM"},
+  {id:"bot",     icon:"🤖", label:"Bot de IA"},
+  {id:"landing", icon:"🌐", label:"Landing Page"},
 ];
 
 const WORKSPACE_LANDING_URL = {
@@ -204,7 +210,7 @@ function Workspace({auth, onLogout}){
 
   useEffect(()=>{
     // garante que a aba ativa é um módulo contratado neste workspace
-    const contracted = workspaceModules[workspaceId] || ["crm"];
+    const contracted = workspaceModules[workspaceId] || ["crm", "bot"];
     if(!contracted.includes(activeModule)){
       setActiveModule(contracted[0]);
     }
@@ -475,7 +481,7 @@ function Workspace({auth, onLogout}){
 /* ---------------- Top bar ---------------- */
 function TopBar({workspaceId, setWorkspaceId, userId, isMaster, workspaceUserIds, role, activeModule, setActiveModule, workspaceModules, onLogout}){
   const [showNotif, setShowNotif] = useState(false);
-  const contractedIds = workspaceModules[workspaceId] || ["crm"];
+  const contractedIds = workspaceModules[workspaceId] || ["crm", "bot"];
   // o Admin Master enxerga sempre as três abas (mesmo módulos não contratados)
   // pois é ele quem decide, na tela de Configurações, o que cada empresa tem ativo.
   const contractedModules = isMaster ? MODULE_DEFS : MODULE_DEFS.filter(m=>contractedIds.includes(m.id));
@@ -1567,6 +1573,7 @@ function BotModule({workspaceId, workspaceName, userId}){
 
   const [waStatus, setWaStatus] = useState(null);     // { state, qrcode, updatedAt }
   const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [actionError, setActionError] = useState(null);
 
   const [contacts, setContacts] = useState([]);
@@ -1745,12 +1752,17 @@ function BotModule({workspaceId, workspaceName, userId}){
 }
 
   async function handleDisconnect(){
+    if(disconnecting) return;
     setActionError(null);
+    setDisconnecting(true);
     try{
       await api.disconnectWhatsapp(workspaceId);
       setWaStatus({state:'close', qrcode:null});
     }catch(err){
-      setActionError(String(err.message||err));
+      console.error("Erro ao desconectar WhatsApp:", err);
+      setActionError("Erro ao desconectar: " + String(err.message||err));
+    }finally{
+      setDisconnecting(false);
     }
   }
 
@@ -1908,7 +1920,9 @@ function BotModule({workspaceId, workspaceName, userId}){
             <div className="list-header">
               <div className="list-title">
                 <span>Conversas</span>
-                <button className="btn danger sm" onClick={handleDisconnect} title="Desconectar este número">Desconectar</button>
+                <button className="btn danger sm" onClick={handleDisconnect} disabled={disconnecting} title="Desconectar este número">
+                  {disconnecting ? "Desconectando..." : "Desconectar"}
+                </button>
               </div>
             </div>
             <div className="contacts-scroll" ref={contactsScrollRef} onScroll={handleContactsScroll}>
