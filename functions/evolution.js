@@ -28,6 +28,26 @@ function client() {
   });
 }
 
+// Tenta de novo (1x, com timeout maior) se a primeira chamada estourar por
+// timeout — cobre o caso raro de pegar o servidor Render bem no momento em
+// que ele ainda está "acordando" de uma hibernação, mesmo com o keep-alive ativo.
+async function withRetryOnTimeout(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const isTimeout = err.code === "ECONNABORTED" || /timeout/i.test(err.message || "");
+    if (!isTimeout) throw err;
+    console.log("Timeout na Evolution API, tentando de novo com mais tempo...");
+    const { url, apikey } = getConfig();
+    const retryClient = axios.create({
+      baseURL: url,
+      headers: { apikey, "Content-Type": "application/json" },
+      timeout: 30000, // dá mais margem nessa segunda tentativa
+    });
+    return await fn(retryClient);
+  }
+}
+
 /**
  * Cria uma instância na Evolution API para um tenant (empresa).
  * instanceName deve ser único — recomendo usar o tenantId.
@@ -51,16 +71,20 @@ async function createInstance(instanceName, webhookUrl) {
 
 /** Busca o QR code atual de conexão da instância */
 async function getQrCode(instanceName) {
-  const api = client();
-  const { data } = await api.get(`/instance/connect/${instanceName}`);
-  return data; // { base64, pairingCode, ... }
+  return withRetryOnTimeout(async (retryApi) => {
+    const api = retryApi || client();
+    const { data } = await api.get(`/instance/connect/${instanceName}`);
+    return data; // { base64, pairingCode, ... }
+  });
 }
 
 /** Status de conexão da instância (open, close, connecting) */
 async function getStatus(instanceName) {
-  const api = client();
-  const { data } = await api.get(`/instance/connectionState/${instanceName}`);
-  return data;
+  return withRetryOnTimeout(async (retryApi) => {
+    const api = retryApi || client();
+    const { data } = await api.get(`/instance/connectionState/${instanceName}`);
+    return data;
+  });
 }
 
 /** Desconecta / apaga a instância */
