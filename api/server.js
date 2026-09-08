@@ -301,8 +301,28 @@ app.get("/api/whatsapp/status/:tenantId", requireAuth, async (req, res) => {
     const result = await evo.getStatus(tenantId);
     res.json({ ok: true, status: result });
   } catch (err) {
-    console.error("Erro ao buscar status:", err?.response?.data || err);
-    res.status(500).json({ ok: false, error: err?.response?.data || String(err) });
+    const data = err?.response?.data;
+    const instanceMissing =
+      err?.response?.status === 404 ||
+      JSON.stringify(data || "").includes("does not exist");
+
+    if (instanceMissing) {
+      // A Evolution API não tem mais essa instância (foi apagada, ou nunca chegou
+      // a existir de fato) — corrige o status guardado no Firestore pra refletir
+      // a realidade, em vez de continuar martelando erro a cada poucos segundos.
+      withTimeout(
+        db.collection("tenants").doc(tenantId)
+          .collection("whatsapp").doc("status")
+          .set({ state: "close", qrcode: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }),
+        8000,
+        "corrigir status (instância inexistente)"
+      ).catch((e) => console.error("Erro ao corrigir status (não bloqueante):", e));
+
+      return res.json({ ok: true, status: { state: "close" }, instanceMissing: true });
+    }
+
+    console.error("Erro ao buscar status:", data || err);
+    res.status(500).json({ ok: false, error: data || String(err) });
   }
 });
 
