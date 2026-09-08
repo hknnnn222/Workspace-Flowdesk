@@ -1,5 +1,20 @@
 const {useState, useMemo, useEffect, useRef} = React;
 
+// Paleta de cores pra avatares — cada pessoa (contato OU participante de um
+// grupo) sempre cai na mesma cor, calculada a partir do nome/telefone dela.
+// Isso é o que dá a "diferença visual" entre pessoas diferentes na tela.
+const AVATAR_COLOR_PALETTE = [
+  "#4f7cff,#6c4fff", "#25D366,#128C7E", "#E1306C,#C13584", "#f59e0b,#d97706",
+  "#a855f7,#7e22ce", "#22c55e,#15803d", "#06b6d4,#0e7490", "#ef4444,#b91c1c",
+  "#ec4899,#be185d", "#8b5cf6,#6d28d9",
+];
+function avatarColorFor(seed){
+  const s = String(seed||'?');
+  let hash = 0;
+  for(let i=0;i<s.length;i++){ hash = (hash*31 + s.charCodeAt(i)) >>> 0; }
+  return AVATAR_COLOR_PALETTE[hash % AVATAR_COLOR_PALETTE.length];
+}
+
 /* =========================================================================
    MODELO DE DADOS (mock em memória, respeitando o desenho relacional)
    ========================================================================= */
@@ -1930,9 +1945,9 @@ function BotModule({workspaceId, workspaceName, userId}){
               {contacts.length===0 && <div className="fd-empty">Nenhuma conversa ainda. Assim que alguém escrever para o número conectado, aparece aqui.</div>}
               {contacts.map(c=>(
                 <div key={c.id} className={"contact-card"+(selectedId===c.id?" active":"")} onClick={()=>setSelectedId(c.id)}>
-                  <div className="contact-avatar">
+                  <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(c.phone||c.name)})`}}>
                     {(c.name||c.phone||'?').slice(0,2).toUpperCase()}
-                    <span className="channel-dot"></span>
+                    <span className="channel-dot" title={c.isGroup ? "Grupo" : "WhatsApp"}>{c.isGroup ? "👥" : ""}</span>
                   </div>
                   <div className="contact-info">
                     <div className="contact-name">
@@ -1955,9 +1970,14 @@ function BotModule({workspaceId, workspaceName, userId}){
             ) : (
               <>
                 <div className="chat-header">
-                  <div className="contact-avatar-lg">{(contacts.find(c=>c.id===selectedId)?.name||'?').slice(0,2).toUpperCase()}</div>
+                  <div className="contact-avatar-lg" style={{background:`linear-gradient(135deg,${avatarColorFor(contacts.find(c=>c.id===selectedId)?.phone||contacts.find(c=>c.id===selectedId)?.name)})`}}>
+                    {(contacts.find(c=>c.id===selectedId)?.name||'?').slice(0,2).toUpperCase()}
+                  </div>
                   <div>
-                    <div className="chat-contact-name">{contacts.find(c=>c.id===selectedId)?.name || contacts.find(c=>c.id===selectedId)?.phone}</div>
+                    <div className="chat-contact-name">
+                      {contacts.find(c=>c.id===selectedId)?.name || contacts.find(c=>c.id===selectedId)?.phone}
+                      {contacts.find(c=>c.id===selectedId)?.isGroup && <span title="Grupo" style={{marginLeft:6}}>👥</span>}
+                    </div>
                     <div className="chat-contact-sub">
                       <span className="channel-label">WhatsApp</span>
                       <span className="dot-sep">·</span>
@@ -1971,15 +1991,27 @@ function BotModule({workspaceId, workspaceName, userId}){
                       Carregando mensagens antigas…
                     </div>
                   )}
-                  {messages.map((m,i)=>(
-                    <div key={m.id||i} className={"msg-wrap"+(m.from==='agent'?' out':'')}>
-                      <div className="msg-avatar-sm">{m.from==='agent' ? (userId||'').slice(0,2).toUpperCase() : (contacts.find(c=>c.id===selectedId)?.name||'?').slice(0,2).toUpperCase()}</div>
-                      <div>
-                        <div className="msg-bubble">{m.text}</div>
-                        <div className="msg-time">{fmtTime(m.timestamp)}</div>
+                  {messages.map((m,i)=>{
+                    const isGroupMsg = contacts.find(c=>c.id===selectedId)?.isGroup && m.from!=='agent';
+                    const label = m.from==='agent' ? (userId||'') : (isGroupMsg ? (m.senderName||m.senderPhone||'?') : (contacts.find(c=>c.id===selectedId)?.name||'?'));
+                    const colorSeed = m.from==='agent' ? userId : (isGroupMsg ? (m.senderPhone||m.senderName) : (contacts.find(c=>c.id===selectedId)?.phone||contacts.find(c=>c.id===selectedId)?.name));
+                    return (
+                      <div key={m.id||i} className={"msg-wrap"+(m.from==='agent'?' out':'')}>
+                        <div className="msg-avatar-sm" style={m.from==='agent' ? {} : {background:`linear-gradient(135deg,${avatarColorFor(colorSeed)})`}}>
+                          {label.slice(0,2).toUpperCase()}
+                        </div>
+                        <div>
+                          {isGroupMsg && (
+                            <div style={{fontSize:11, fontWeight:600, marginBottom:2, color:avatarColorFor(colorSeed).split(',')[0]}}>
+                              {m.senderName || m.senderPhone}
+                            </div>
+                          )}
+                          <div className="msg-bubble">{m.text}</div>
+                          <div className="msg-time">{fmtTime(m.timestamp)}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="input-area">
                   <div className="input-row">

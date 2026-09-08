@@ -120,10 +120,18 @@ function withTimeout(promise, ms, label) {
 async function handleIncomingMessage(tenantId, data) {
   if (!data || !data.key) return;
   const remoteJid = data.key.remoteJid || "";
+  const isGroup = remoteJid.endsWith("@g.us");
   const phone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
   const fromMe = !!data.key.fromMe;
   const pushName = data.pushName || phone;
   const messageDocId = data.key.id || null; // ID da mensagem no WhatsApp — usamos como ID do doc pra evitar duplicar
+
+  // Em grupos, quem realmente escreveu a mensagem vem em "participant" (o
+  // remoteJid é o ID do GRUPO, não da pessoa). Em conversa individual não
+  // existe esse campo — nesse caso o remetente é o próprio contato.
+  const senderJid = isGroup ? (data.key.participant || data.participant || "") : remoteJid;
+  const senderPhone = senderJid ? senderJid.replace("@s.whatsapp.net", "").replace("@g.us", "") : phone;
+  const senderName = isGroup ? (data.pushName || senderPhone) : pushName;
 
   const text =
     data.message?.conversation ||
@@ -157,9 +165,10 @@ async function handleIncomingMessage(tenantId, data) {
       name: pushName,
       phone,
       channel: "wa",
+      isGroup,
       status: "potencial",
       unread: fromMe ? 0 : 1,
-      preview: text,
+      preview: (isGroup && !fromMe ? `${senderName}: ` : "") + text,
       tags: [],
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       lastMessageAt: messageTimestamp,
@@ -191,7 +200,8 @@ async function handleIncomingMessage(tenantId, data) {
       msgDate.getTime() >= currentLastMessageAt.toDate().getTime();
 
     await contactsRef.doc(contactId).update({
-      ...(isNewer ? { preview: text, lastMessageAt: messageTimestamp } : {}),
+      ...(isNewer ? { preview: (isGroup && !fromMe ? `${senderName}: ` : "") + text, lastMessageAt: messageTimestamp } : {}),
+      ...(isGroup ? { isGroup: true } : {}),
       unread: fromMe ? 0 : admin.firestore.FieldValue.increment(1),
     });
   }
@@ -202,6 +212,7 @@ async function handleIncomingMessage(tenantId, data) {
     raw: data.message || null,
     messageId: data.key.id,
     timestamp: messageTimestamp,
+    ...(isGroup ? { senderPhone, senderName } : {}),
   };
 
   if (messageDocId) {
