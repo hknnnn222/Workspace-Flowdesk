@@ -59,12 +59,20 @@ async function ensureTenantSession(tenantId) {
   return true;
 }
 
+function contactsCol(tenantId) {
+  return db.collection("tenants").doc(tenantId).collection("contacts");
+}
+
 window.FlowDeskAPI = {
   configured: FIREBASE_CONFIGURED,
   auth,
   db,
   apiCall,
   ensureTenantSession,
+
+  // ─────────────────────────────────────────────────
+  // WhatsApp (Evolution API)
+  // ─────────────────────────────────────────────────
   // Envia mensagem de WhatsApp de verdade via Evolution API
   sendMessage: (tenantId, contactId, phone, text) =>
     apiCall("/api/send", "POST", { tenantId, contactId, phone, text }),
@@ -79,12 +87,15 @@ window.FlowDeskAPI = {
         (snap) => callback(snap.exists ? snap.data() : null),
         (err) => console.error("listenWhatsappStatus:", err)
       ),
+
+  // ─────────────────────────────────────────────────
+  // Contatos / conversas
+  // ─────────────────────────────────────────────────
   // Escuta em tempo real só os primeiros `limit` contatos (padrão: 30),
-  // ordenados pela conversa mais recente. Evita carregar TODOS os contatos
-  // de uma vez (o que gastaria 1 leitura por contato, toda vez).
-  // `status` é opcional: 'potencial' | 'pendente' | 'ativo' (filtra a aba).
+  // ordenados pela conversa mais recente. `status` é opcional
+  // ('potencial' | 'pendente' | 'ativo') pra filtrar a aba ativa.
   listenContacts: (tenantId, limit, callback, status) => {
-    let q = db.collection("tenants").doc(tenantId).collection("contacts");
+    let q = contactsCol(tenantId);
     if (status) q = q.where("status", "==", status);
     return q
       .orderBy("lastMessageAt", "desc")
@@ -95,11 +106,9 @@ window.FlowDeskAPI = {
       );
   },
   // Busca (uma vez só, sem tempo real) mais `limit` contatos mais antigos
-  // que `afterContact` (o último item que já está na tela). Usado quando o
-  // usuário rola pra baixo na lista de conversas procurando mais contatos.
-  // `status` é opcional, mesmo filtro de listenContacts.
+  // que `afterContact`. Usado ao rolar a lista pra baixo. `status` idem acima.
   loadMoreContacts: (tenantId, afterContact, limit, status) => {
-    let q = db.collection("tenants").doc(tenantId).collection("contacts");
+    let q = contactsCol(tenantId);
     if (status) q = q.where("status", "==", status);
     return q
       .orderBy("lastMessageAt", "desc")
@@ -109,10 +118,10 @@ window.FlowDeskAPI = {
       .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
   },
   // Conta quantos contatos existem em cada status (potencial/pendente/ativo)
-  // pra alimentar os "chips" no topo da lista. Usa contagem agregada
-  // (.count()) quando disponível no SDK; senão cai pra .get() normal.
+  // pra alimentar os "chips" no topo da lista. Usa contagem agregada (.count())
+  // quando disponível no SDK; senão cai pra .get() normal.
   getContactCounts: async (tenantId) => {
-    const base = db.collection("tenants").doc(tenantId).collection("contacts");
+    const base = contactsCol(tenantId);
     const statuses = ["potencial", "pendente", "ativo"];
     const counts = { potencial: 0, pendente: 0, ativo: 0 };
     await Promise.all(
@@ -134,14 +143,34 @@ window.FlowDeskAPI = {
     return counts;
   },
   // Atualiza o status de um contato (potencial/pendente/ativo) — usado pelo
-  // seletor na linha do contato.
+  // seletor na linha do contato. Marcar como "ativo" é sempre manual.
   setContactStatus: (tenantId, contactId, status) =>
-    db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
-      .update({ status }),
+    contactsCol(tenantId).doc(contactId).update({ status }),
+  // Atribui (ou remove, com null) um atendente responsável pela conversa —
+  // usa os mesmos membros do workspace (CRM), não uma lista separada.
+  assignContact: (tenantId, contactId, userId, userName) =>
+    contactsCol(tenantId).doc(contactId).update({
+      assignedTo: userId || null,
+      assignedToName: userName || null,
+    }),
+  // Aplica/atualiza a lista de etiquetas (tags) de um contato.
+  setContactTags: (tenantId, contactId, tags) =>
+    contactsCol(tenantId).doc(contactId).update({ tags }),
+  // Vincula esse contato do bot a um Contato/Empresa já existentes no CRM
+  // (ou grava os ids recém-criados) — usado pelo botão "Enviar para o CRM".
+  linkContactToCrm: (tenantId, contactId, { crmContactId, crmCompanyId }) =>
+    contactsCol(tenantId).doc(contactId).update({
+      crmContactId: crmContactId || null,
+      crmCompanyId: crmCompanyId || null,
+    }),
+
+  // ─────────────────────────────────────────────────
+  // Mensagens
+  // ─────────────────────────────────────────────────
   // Escuta em tempo real só as últimas `limit` mensagens (padrão: 30).
   // Retorna também um callback com a lista já na ordem certa (mais antiga primeiro).
   listenMessages: (tenantId, contactId, limit, callback) =>
-    db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
+    contactsCol(tenantId).doc(contactId)
       .collection("messages").orderBy("timestamp", "desc").limit(limit || 30)
       .onSnapshot(
         (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse()),
@@ -150,10 +179,54 @@ window.FlowDeskAPI = {
   // Busca (uma vez só, sem tempo real) até `limit` mensagens mais antigas que `beforeTimestamp`.
   // Usado quando o usuário rola pra cima procurando histórico.
   loadOlderMessages: (tenantId, contactId, beforeTimestamp, limit) =>
-    db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
+    contactsCol(tenantId).doc(contactId)
       .collection("messages").orderBy("timestamp", "desc")
       .startAfter(beforeTimestamp)
       .limit(limit || 30)
       .get()
       .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse()),
+  // Grava uma mensagem de sistema (ex: "Transferido para Fulano") no histórico
+  // da conversa, sem passar pelo WhatsApp de verdade — só visível no painel.
+  addSystemMessage: (tenantId, contactId, text) =>
+    contactsCol(tenantId).doc(contactId).collection("messages").add({
+      from: "system",
+      text,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    }),
+
+  // ─────────────────────────────────────────────────
+  // Mensagens rápidas (respostas prontas) — por empresa/tenant
+  // ─────────────────────────────────────────────────
+  listenQuickReplies: (tenantId, callback) =>
+    db.collection("tenants").doc(tenantId).collection("quickReplies")
+      .orderBy("trigger")
+      .onSnapshot(
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("listenQuickReplies:", err)
+      ),
+  saveQuickReply: (tenantId, { id, trigger, text, category }) => {
+    const col = db.collection("tenants").doc(tenantId).collection("quickReplies");
+    if (id) return col.doc(id).update({ trigger, text, category });
+    return col.add({ trigger, text, category, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  },
+  deleteQuickReply: (tenantId, id) =>
+    db.collection("tenants").doc(tenantId).collection("quickReplies").doc(id).delete(),
+
+  // ─────────────────────────────────────────────────
+  // Etiquetas (labels) — por empresa/tenant
+  // ─────────────────────────────────────────────────
+  listenLabels: (tenantId, callback) =>
+    db.collection("tenants").doc(tenantId).collection("labels")
+      .orderBy("name")
+      .onSnapshot(
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("listenLabels:", err)
+      ),
+  saveLabel: (tenantId, { id, name, color, bg }) => {
+    const col = db.collection("tenants").doc(tenantId).collection("labels");
+    if (id) return col.doc(id).update({ name, color, bg });
+    return col.add({ name, color, bg, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  },
+  deleteLabel: (tenantId, id) =>
+    db.collection("tenants").doc(tenantId).collection("labels").doc(id).delete(),
 };

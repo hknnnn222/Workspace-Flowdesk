@@ -285,10 +285,12 @@ function Workspace({auth, onLogout}){
     if(data.id){
       setContacts(prev=>prev.map(c=> c.id===data.id ? {...c, ...data} : c));
       logActivity(data.id, 'contact', 'Dados do contato atualizados.', 'note');
+      return data.id;
     } else {
       const id = newId('p');
       setContacts(prev=>[...prev, {...data, id, workspace_id:workspaceId, owner_id:userId}]);
       logActivity(id, 'contact', 'Contato criado.', 'note');
+      return id;
     }
   }
 
@@ -298,12 +300,15 @@ function Workspace({auth, onLogout}){
       const idx = COMPANIES.findIndex(c=>c.id===data.id);
       if(idx>-1) COMPANIES[idx] = {...COMPANIES[idx], ...data};
       logActivity(data.id, 'company', 'Dados da empresa atualizados.', 'note');
+      setCompaniesVersion(v=>v+1);
+      return data.id;
     } else {
       const id = newId('c');
       COMPANIES.push({...data, id, workspace_id:workspaceId, owner_id:userId});
       logActivity(id, 'company', 'Empresa criada.', 'note');
+      setCompaniesVersion(v=>v+1);
+      return id;
     }
-    setCompaniesVersion(v=>v+1);
   }
 
   function saveTask(data){
@@ -432,7 +437,20 @@ function Workspace({auth, onLogout}){
       </div>
 
       <div style={{display: activeModule==='bot' ? 'block' : 'none'}}>
-        <BotModule workspaceId={workspaceId} workspaceName={WORKSPACES.find(w=>w.id===workspaceId)?.name} userId={userId} />
+        <BotModule
+          workspaceId={workspaceId}
+          workspaceName={WORKSPACES.find(w=>w.id===workspaceId)?.name}
+          userId={userId}
+          currentUserName={userById(userId)?.name}
+          // integração com o CRM: só oferece "Enviar para o CRM" se a empresa
+          // tiver os dois módulos contratados juntos.
+          crmEnabled={(workspaceModules[workspaceId]||[]).includes('crm')}
+          companies={wsCompanies}
+          saveContact={saveContact}
+          saveCompany={saveCompany}
+          // atendentes = os mesmos membros do workspace (mesma lista do CRM)
+          agents={workspaceUserIds.map(uid=>userById(uid)).filter(Boolean)}
+        />
       </div>
       <div style={{display: activeModule==='landing' ? 'block' : 'none'}}>
         <LandingModule url={WORKSPACE_LANDING_URL[workspaceId]} />
@@ -1578,7 +1596,8 @@ function DetailDrawer({drawer, onClose, tasks, activities, contacts, onToggleTas
 /* Card de um contato/grupo na lista de conversas do Bot de IA, com avatar
    colorido por pessoa, badge de não-lidas, e um seletor pra reclassificar o
    status (Potencial/Pendente/Ativo) sem precisar abrir a conversa. */
-function ContactCard({c, selected, onSelect, onChangeStatus}){
+function ContactCard({c, selected, onSelect, onChangeStatus, labelsById}){
+  const tags = c.tags || [];
   return (
     <div className={"contact-card"+(selected?" active":"")} onClick={onSelect}>
       <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(c.phone||c.name)})`}}>
@@ -1586,8 +1605,23 @@ function ContactCard({c, selected, onSelect, onChangeStatus}){
         {c.isGroup && <span className="channel-dot" title="Grupo">👥</span>}
       </div>
       <div className="contact-info">
-        <div className="contact-name">{c.name || c.phone}</div>
+        <div className="contact-name">
+          {c.name || c.phone}
+          {c.assignedToName && <span title={"Atribuído a "+c.assignedToName} style={{fontSize:10, color:'var(--text3)', fontWeight:500}}>· {c.assignedToName}</span>}
+        </div>
         <div className="contact-preview">{c.preview || ''}</div>
+        {tags.length>0 && (
+          <div style={{marginTop:3, display:'flex', flexWrap:'wrap', gap:3}}>
+            {tags.map(t=>{
+              const l = labelsById ? labelsById[t] : null;
+              return (
+                <span key={t} className="tag-pill" style={{background:l?l.bg:'rgba(145,152,176,0.15)', color:l?l.color:'var(--text2)', fontSize:9, padding:'1px 6px', borderRadius:8}}>
+                  {t}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="contact-meta" onClick={e=>e.stopPropagation()}>
         {c.unread>0 && <span className="contact-badge">{c.unread}</span>}
@@ -1610,7 +1644,7 @@ function ContactCard({c, selected, onSelect, onChangeStatus}){
    Cada empresa (workspace) é um "tenant" isolado. O tenantId usado na Evolution API
    e no Firestore é o próprio workspaceId (ex: "ws_atlas"), então cada empresa conecta
    um número de WhatsApp diferente sem nenhum conflito entre elas. */
-function BotModule({workspaceId, workspaceName, userId}){
+function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnabled, companies, saveContact, saveCompany, agents}){
   const api = window.FlowDeskAPI;
   const configured = !!(api && api.configured);
 
@@ -1639,6 +1673,26 @@ function BotModule({workspaceId, workspaceName, userId}){
   const [sending, setSending] = useState(false);
   const messagesContainerRef = useRef(null);
   const MESSAGES_PAGE_SIZE = 30;
+
+  // ── Etiquetas, mensagens rápidas e transferência de atendimento ──
+  const [labels, setLabels] = useState([]);           // [{id,name,color,bg}]
+  const [quickReplies, setQuickReplies] = useState([]);// [{id,trigger,text,category}]
+  const [showLabelsModal, setShowLabelsModal] = useState(false);
+  const [showQuickModal, setShowQuickModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showCrmModal, setShowCrmModal] = useState(false);
+  const [quickSearch, setQuickSearch] = useState('');
+  const [newQuickReply, setNewQuickReply] = useState(null); // {trigger,text,category} enquanto edita
+  const [newLabelDraft, setNewLabelDraft] = useState(null); // {name,color} enquanto cria etiqueta nova
+  const [crmSaving, setCrmSaving] = useState(false);
+
+  const labelsById = useMemo(()=>{
+    const map = {};
+    labels.forEach(l=>{ map[l.name] = l; });
+    return map;
+  },[labels]);
+
+  const selectedContact = contacts.find(c=>c.id===selectedId) || null;
 
   // 1) Autentica (login anônimo) e "carimba" o tenantId (empresa atual) no token,
   //    para as Firestore Rules liberarem só os dados dessa empresa.
@@ -1710,6 +1764,14 @@ function BotModule({workspaceId, workspaceName, userId}){
     return ()=>{ cancelled = true; };
   },[configured, sessionReady, workspaceId, contacts.length]);
 
+  // Escuta etiquetas e mensagens rápidas cadastradas pela empresa (tempo real)
+  useEffect(()=>{
+    if(!configured || !sessionReady || !workspaceId) return;
+    const unsubLabels = api.listenLabels(workspaceId, setLabels);
+    const unsubQuick = api.listenQuickReplies(workspaceId, setQuickReplies);
+    return ()=>{ unsubLabels && unsubLabels(); unsubQuick && unsubQuick(); };
+  },[configured, sessionReady, workspaceId]);
+
   // Busca mais contatos antigos quando o usuário rola pro final da lista
   async function loadMoreContacts(){
     if(loadingMoreContacts || !hasMoreContacts) return;
@@ -1747,6 +1809,106 @@ function BotModule({workspaceId, workspaceName, userId}){
       setContacts(prev=>prev.map(c=>c.id===contactId ? {...c, status:newStatus} : c));
     }catch(err){
       console.error("Erro ao mudar status do contato:", err);
+    }
+  }
+
+  // ── Transferir atendimento (usa os mesmos membros do workspace/CRM) ──
+  async function handleTransfer(agentUserId){
+    if(!selectedContact) return;
+    const agent = agents.find(a=>a.id===agentUserId);
+    try{
+      await api.assignContact(workspaceId, selectedContact.id, agentUserId, agent?agent.name:null);
+      await api.addSystemMessage(workspaceId, selectedContact.id,
+        agent ? `Atendimento transferido para ${agent.name}.` : 'Atribuição removida.');
+      setContacts(prev=>prev.map(c=>c.id===selectedContact.id ? {...c, assignedTo:agentUserId||null, assignedToName:agent?agent.name:null} : c));
+      setShowTransferModal(false);
+    }catch(err){
+      console.error("Erro ao transferir atendimento:", err);
+      setActionError("Erro ao transferir: " + String(err.message||err));
+    }
+  }
+
+  // ── Etiquetas ──
+  async function handleToggleTag(tagName){
+    if(!selectedContact) return;
+    const current = selectedContact.tags || [];
+    const next = current.includes(tagName) ? current.filter(t=>t!==tagName) : [...current, tagName];
+    try{
+      await api.setContactTags(workspaceId, selectedContact.id, next);
+      setContacts(prev=>prev.map(c=>c.id===selectedContact.id ? {...c, tags:next} : c));
+    }catch(err){
+      console.error("Erro ao atualizar etiquetas:", err);
+    }
+  }
+
+  async function handleCreateLabel(name, color){
+    const bg = color + '26'; // ~15% opacidade em hex
+    try{
+      await api.saveLabel(workspaceId, {name, color, bg});
+      setNewLabelDraft(null);
+    }catch(err){
+      console.error("Erro ao criar etiqueta:", err);
+    }
+  }
+
+  async function handleDeleteLabel(labelId){
+    if(!confirm('Excluir esta etiqueta? Ela será removida dos contatos que a usam.')) return;
+    try{ await api.deleteLabel(workspaceId, labelId); }
+    catch(err){ console.error("Erro ao excluir etiqueta:", err); }
+  }
+
+  // ── Mensagens rápidas ──
+  function insertQuickReply(text){
+    setInput(text);
+    setShowQuickModal(false);
+  }
+
+  async function handleSaveQuickReply(){
+    if(!newQuickReply || !newQuickReply.trigger.trim() || !newQuickReply.text.trim()) return;
+    try{
+      await api.saveQuickReply(workspaceId, newQuickReply);
+      setNewQuickReply(null);
+    }catch(err){
+      console.error("Erro ao salvar mensagem rápida:", err);
+    }
+  }
+
+  async function handleDeleteQuickReply(id){
+    try{ await api.deleteQuickReply(workspaceId, id); }
+    catch(err){ console.error("Erro ao excluir mensagem rápida:", err); }
+  }
+
+  const visibleQuickReplies = useMemo(()=>{
+    const q = quickSearch.trim().toLowerCase();
+    if(!q) return quickReplies;
+    return quickReplies.filter(r=> r.trigger.toLowerCase().includes(q) || r.text.toLowerCase().includes(q));
+  },[quickReplies, quickSearch]);
+
+  // ── Enviar para o CRM (cria/vincula Empresa + Contato) ──
+  async function handleSendToCrm({ mode, companyId, newCompanyName, contactName, roleTitle }){
+    if(!selectedContact) return;
+    setCrmSaving(true);
+    try{
+      let finalCompanyId = companyId;
+      if(mode==='new'){
+        finalCompanyId = saveCompany({ name:newCompanyName, segment:'', size:'11-50', cnpj:'', phone:selectedContact.phone, email:'' });
+      }
+      const newContactId = saveContact({
+        name: contactName || selectedContact.name || selectedContact.phone,
+        role_title: roleTitle || '',
+        company_id: finalCompanyId || '',
+        phone: selectedContact.phone,
+        email: '',
+        cpf: '',
+      });
+      await api.linkContactToCrm(workspaceId, selectedContact.id, { crmContactId:newContactId, crmCompanyId:finalCompanyId||null });
+      setContacts(prev=>prev.map(c=>c.id===selectedContact.id ? {...c, crmContactId:newContactId, crmCompanyId:finalCompanyId||null} : c));
+      setShowCrmModal(false);
+    }catch(err){
+      console.error("Erro ao enviar para o CRM:", err);
+      setActionError("Erro ao enviar para o CRM: " + String(err.message||err));
+    }finally{
+      setCrmSaving(false);
     }
   }
 
@@ -2056,13 +2218,13 @@ function BotModule({workspaceId, workspaceName, userId}){
                   <React.Fragment key={key}>
                     <div className="section-label">{STATUS_LABELS[key]}</div>
                     {arr.map(c=>(
-                      <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} />
+                      <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} />
                     ))}
                   </React.Fragment>
                 ))
               ) : (
                 visibleContacts.map(c=>(
-                  <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} />
+                  <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} />
                 ))
               )}
               {loadingMoreContacts && (
@@ -2089,9 +2251,37 @@ function BotModule({workspaceId, workspaceName, userId}){
                       <span className="channel-label">WhatsApp</span>
                       <span className="dot-sep">·</span>
                       <span>{contacts.find(c=>c.id===selectedId)?.phone}</span>
+                      {selectedContact?.assignedToName && (
+                        <React.Fragment>
+                          <span className="dot-sep">·</span>
+                          <span title="Atendente responsável">{selectedContact.assignedToName}</span>
+                        </React.Fragment>
+                      )}
+                      {selectedContact?.crmContactId && (
+                        <React.Fragment>
+                          <span className="dot-sep">·</span>
+                          <span style={{color:'var(--green)'}} title="Já sincronizado com o CRM">✓ No CRM</span>
+                        </React.Fragment>
+                      )}
                     </div>
                   </div>
+                  <div className="header-actions">
+                    <button className="btn sm" onClick={()=>setShowLabelsModal(true)} title="Etiquetas">🏷️</button>
+                    <button className="btn sm" onClick={()=>setShowQuickModal(true)} title="Mensagens rápidas">⚡</button>
+                    <button className="btn sm" onClick={()=>setShowTransferModal(true)} title="Transferir atendimento">↗️</button>
+                    {crmEnabled && !selectedContact?.crmContactId && (
+                      <button className="btn sm primary" onClick={()=>setShowCrmModal(true)} title="Enviar para o CRM">→ CRM</button>
+                    )}
+                  </div>
                 </div>
+                {selectedContact && (selectedContact.tags||[]).length>0 && (
+                  <div style={{padding:'6px 14px 0', display:'flex', flexWrap:'wrap', gap:5, background:'var(--surface)', borderBottom:'1px solid var(--border)', paddingBottom:8}}>
+                    {(selectedContact.tags||[]).map(t=>{
+                      const l = labelsById[t];
+                      return <span key={t} className="tag-pill" style={{background:l?l.bg:'rgba(145,152,176,0.15)', color:l?l.color:'var(--text2)', fontSize:10, padding:'2px 8px', borderRadius:10}}>{t}</span>;
+                    })}
+                  </div>
+                )}
                 <div className="messages-container" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
                   {loadingMore && (
                     <div style={{textAlign:'center', padding:'6px', fontSize:'11px', color:'var(--text3)'}}>
@@ -2122,13 +2312,14 @@ function BotModule({workspaceId, workspaceName, userId}){
                 </div>
                 <div className="input-area">
                   <div className="input-row">
+                    <button className="btn sm" onClick={()=>setShowQuickModal(true)} title="Mensagens rápidas" style={{flexShrink:0}}>⚡</button>
                     <textarea
                       className="msg-input"
                       rows={1}
                       value={input}
                       onChange={e=>setInput(e.target.value)}
                       onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); } }}
-                      placeholder="Digite uma mensagem para enviar pelo WhatsApp…"
+                      placeholder="Digite uma mensagem para enviar pelo WhatsApp… (ou / para respostas rápidas)"
                     />
                     <button className="send-btn" onClick={handleSend} disabled={!input.trim()||sending} title="Enviar">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -2140,6 +2331,184 @@ function BotModule({workspaceId, workspaceName, userId}){
           </main>
         </div>
       )}
+
+      {/* ── Modal: Etiquetas ── */}
+      {showLabelsModal && (
+        <div className="modal-overlay open" onClick={()=>setShowLabelsModal(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">Etiquetas {selectedContact ? `— ${selectedContact.name||selectedContact.phone}` : ''} <span className="modal-close" onClick={()=>setShowLabelsModal(false)}>×</span></div>
+            {!selectedContact ? (
+              <div className="fd-empty">Selecione uma conversa para gerenciar as etiquetas dela.</div>
+            ) : (
+              <div style={{display:'flex', flexWrap:'wrap', gap:7, marginBottom:14}}>
+                {labels.map(l=>{
+                  const on = (selectedContact.tags||[]).includes(l.name);
+                  return (
+                    <span key={l.id} className="tag-pill" style={{cursor:'pointer', background:on?l.bg:'var(--surface2)', color:on?l.color:'var(--text2)', border:'1px solid '+(on?l.color+'55':'var(--border)'), padding:'5px 11px', fontSize:12, borderRadius:20, display:'inline-flex', alignItems:'center', gap:6}}
+                      onClick={()=>handleToggleTag(l.name)}>
+                      {on?'✓ ':''}{l.name}
+                      <span onClick={(e)=>{e.stopPropagation(); handleDeleteLabel(l.id);}} title="Excluir etiqueta" style={{opacity:0.6}}>✕</span>
+                    </span>
+                  );
+                })}
+                {labels.length===0 && <div className="fd-empty" style={{padding:0}}>Nenhuma etiqueta cadastrada ainda.</div>}
+              </div>
+            )}
+            {newLabelDraft ? (
+              <div style={{display:'flex', gap:7, alignItems:'center', borderTop:'1px solid var(--border)', paddingTop:12}}>
+                <input className="msg-input" style={{flex:1}} placeholder="Nome da etiqueta" value={newLabelDraft.name}
+                  onChange={e=>setNewLabelDraft({...newLabelDraft, name:e.target.value})} />
+                <input type="color" value={newLabelDraft.color} onChange={e=>setNewLabelDraft({...newLabelDraft, color:e.target.value})} style={{width:34, height:34, padding:0, border:'none', background:'none', cursor:'pointer'}} />
+                <button className="btn primary sm" onClick={()=>handleCreateLabel(newLabelDraft.name, newLabelDraft.color)} disabled={!newLabelDraft.name.trim()}>Criar</button>
+                <button className="btn sm" onClick={()=>setNewLabelDraft(null)}>Cancelar</button>
+              </div>
+            ) : (
+              <button className="btn primary sm" onClick={()=>setNewLabelDraft({name:'', color:'#4f7cff'})}>+ Nova etiqueta</button>
+            )}
+            <div className="modal-footer"><button className="btn" onClick={()=>setShowLabelsModal(false)}>Fechar</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Mensagens rápidas ── */}
+      {showQuickModal && (
+        <div className="modal-overlay open" onClick={()=>setShowQuickModal(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">Mensagens Rápidas <span className="modal-close" onClick={()=>setShowQuickModal(false)}>×</span></div>
+            <div style={{marginBottom:10, display:'flex', gap:7}}>
+              <input className="msg-input" style={{flex:1}} placeholder="Buscar..." value={quickSearch} onChange={e=>setQuickSearch(e.target.value)} />
+              <button className="btn primary sm" onClick={()=>setNewQuickReply({trigger:'', text:'', category:'Geral'})}>+ Nova</button>
+            </div>
+            <div style={{maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:6}}>
+              {visibleQuickReplies.map(r=>(
+                <div key={r.id} className="quick-reply-item" style={{display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--surface2)', borderRadius:8, cursor:'pointer'}} onClick={()=>insertQuickReply(r.text)}>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{fontSize:12, fontWeight:600, color:'var(--accent)'}}>{r.trigger}</div>
+                    <div style={{fontSize:12, color:'var(--text2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.text}</div>
+                  </div>
+                  <span style={{fontSize:10, color:'var(--text3)', flexShrink:0}}>{r.category}</span>
+                  <span onClick={(e)=>{e.stopPropagation(); handleDeleteQuickReply(r.id);}} title="Excluir" style={{opacity:0.6, flexShrink:0}}>✕</span>
+                </div>
+              ))}
+              {visibleQuickReplies.length===0 && <div className="fd-empty">Nenhuma mensagem rápida cadastrada ainda.</div>}
+            </div>
+            {newQuickReply && (
+              <div style={{marginTop:12, borderTop:'1px solid var(--border)', paddingTop:12}}>
+                <div style={{display:'flex', gap:7, marginBottom:7}}>
+                  <input className="msg-input" style={{flex:1}} placeholder="/atalho" value={newQuickReply.trigger} onChange={e=>setNewQuickReply({...newQuickReply, trigger:e.target.value})} />
+                  <select className="msg-input" style={{width:130}} value={newQuickReply.category} onChange={e=>setNewQuickReply({...newQuickReply, category:e.target.value})}>
+                    <option>Geral</option><option>Vendas</option><option>Suporte</option>
+                  </select>
+                </div>
+                <textarea className="msg-input" rows={2} style={{width:'100%', marginBottom:8}} placeholder="Conteúdo da mensagem..." value={newQuickReply.text} onChange={e=>setNewQuickReply({...newQuickReply, text:e.target.value})} />
+                <div style={{display:'flex', gap:7, justifyContent:'flex-end'}}>
+                  <button className="btn sm" onClick={()=>setNewQuickReply(null)}>Cancelar</button>
+                  <button className="btn primary sm" onClick={handleSaveQuickReply} disabled={!newQuickReply.trigger.trim()||!newQuickReply.text.trim()}>Salvar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Transferir atendimento ── */}
+      {showTransferModal && (
+        <div className="modal-overlay open" onClick={()=>setShowTransferModal(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">Transferir Atendimento <span className="modal-close" onClick={()=>setShowTransferModal(false)}>×</span></div>
+            {!selectedContact ? (
+              <div className="fd-empty">Selecione uma conversa para transferir.</div>
+            ) : (
+              <React.Fragment>
+                <div className="onboard-card-sub" style={{textAlign:'left', marginBottom:14}}>
+                  Escolha um atendente da equipe deste workspace para assumir a conversa com <strong>{selectedContact.name||selectedContact.phone}</strong>.
+                </div>
+                <div style={{display:'flex', flexDirection:'column', gap:6, maxHeight:260, overflowY:'auto'}}>
+                  {agents.map(a=>(
+                    <div key={a.id} className="contact-card" style={{cursor:'pointer'}} onClick={()=>handleTransfer(a.id)}>
+                      <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(a.name)})`}}>{(a.initials||a.name||'?').slice(0,2).toUpperCase()}</div>
+                      <div className="contact-info"><div className="contact-name">{a.name}</div></div>
+                      {selectedContact.assignedTo===a.id && <span className="status-pill active"><span className="dot"></span>Atual</span>}
+                    </div>
+                  ))}
+                  {agents.length===0 && <div className="fd-empty">Nenhum outro membro nesta empresa ainda. Convide atendentes na aba Equipe do CRM.</div>}
+                </div>
+                {selectedContact.assignedTo && (
+                  <button className="btn danger sm" style={{marginTop:12}} onClick={()=>handleTransfer(null)}>Remover atribuição</button>
+                )}
+              </React.Fragment>
+            )}
+            <div className="modal-footer"><button className="btn" onClick={()=>setShowTransferModal(false)}>Fechar</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Enviar para o CRM ── */}
+      {showCrmModal && selectedContact && (
+        <CrmSendModal
+          contact={selectedContact}
+          companies={companies}
+          saving={crmSaving}
+          onClose={()=>setShowCrmModal(false)}
+          onSend={handleSendToCrm}
+        />
+      )}
+    </div>
+  );
+}
+
+/* Modal de envio manual do contato do bot para o CRM (cria/vincula Empresa + Contato) */
+function CrmSendModal({contact, companies, saving, onClose, onSend}){
+  const [mode, setMode] = useState(companies.length ? 'existing' : 'new');
+  const [companyId, setCompanyId] = useState(companies[0]?.id || '');
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [contactName, setContactName] = useState(contact.name || '');
+  const [roleTitle, setRoleTitle] = useState('');
+
+  function handleConfirm(){
+    if(!contactName.trim()) return;
+    if(mode==='new' && !newCompanyName.trim()) return;
+    onSend({ mode, companyId, newCompanyName, contactName, roleTitle });
+  }
+
+  return (
+    <div className="modal-overlay open" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">Enviar para o CRM <span className="modal-close" onClick={onClose}>×</span></div>
+        <div className="onboard-card-sub" style={{textAlign:'left', marginBottom:14}}>
+          Cria (ou vincula) este contato do WhatsApp como um Contato no CRM, ligado a uma Empresa — assim toda a equipe acompanha o negócio num só lugar.
+        </div>
+        <div className="form-group" style={{marginBottom:10}}>
+          <label className="form-label" style={{fontSize:11, color:'var(--text3)', display:'block', marginBottom:4}}>Nome do contato</label>
+          <input className="msg-input" style={{width:'100%'}} value={contactName} onChange={e=>setContactName(e.target.value)} placeholder="Nome completo" />
+        </div>
+        <div className="form-group" style={{marginBottom:10}}>
+          <label className="form-label" style={{fontSize:11, color:'var(--text3)', display:'block', marginBottom:4}}>Cargo (opcional)</label>
+          <input className="msg-input" style={{width:'100%'}} value={roleTitle} onChange={e=>setRoleTitle(e.target.value)} placeholder="Ex: Compras" />
+        </div>
+        <div className="form-group" style={{marginBottom:10}}>
+          <label className="form-label" style={{fontSize:11, color:'var(--text3)', display:'block', marginBottom:4}}>Empresa</label>
+          <div style={{display:'flex', gap:14, marginBottom:8, fontSize:12}}>
+            <label style={{display:'flex', alignItems:'center', gap:5, cursor:'pointer'}}>
+              <input type="radio" checked={mode==='existing'} onChange={()=>setMode('existing')} disabled={companies.length===0} /> Empresa existente
+            </label>
+            <label style={{display:'flex', alignItems:'center', gap:5, cursor:'pointer'}}>
+              <input type="radio" checked={mode==='new'} onChange={()=>setMode('new')} /> Nova empresa
+            </label>
+          </div>
+          {mode==='existing' ? (
+            <select className="msg-input" style={{width:'100%'}} value={companyId} onChange={e=>setCompanyId(e.target.value)}>
+              {companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : (
+            <input className="msg-input" style={{width:'100%'}} value={newCompanyName} onChange={e=>setNewCompanyName(e.target.value)} placeholder="Nome da empresa" />
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn primary" onClick={handleConfirm} disabled={saving}>{saving?'Enviando...':'Enviar para o CRM'}</button>
+        </div>
+      </div>
     </div>
   );
 }

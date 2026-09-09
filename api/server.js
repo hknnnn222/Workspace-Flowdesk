@@ -160,16 +160,25 @@ async function handleIncomingMessage(tenantId, data) {
   const existing = await contactsRef.where("phone", "==", phone).limit(1).get();
   let contactId;
 
+  // Regra de status automático (nunca mexe em "ativo" — esse só muda na mão):
+  //  - contato NOVO (primeira mensagem que ele manda) entra como "pendente"
+  //    (ainda não teve nenhum retorno nosso).
+  //  - assim que a empresa responde pela primeira vez (fromMe === true) numa
+  //    conversa que estava "pendente", ela passa a ser "potencial" (conversa
+  //    já iniciada/em andamento).
   if (existing.empty) {
     const newDoc = await contactsRef.add({
       name: pushName,
       phone,
       channel: "wa",
       isGroup,
-      status: "potencial",
+      status: "pendente",
       unread: fromMe ? 0 : 1,
       preview: (isGroup && !fromMe ? `${senderName}: ` : "") + text,
       tags: [],
+      assignedTo: null,
+      crmContactId: null,
+      crmCompanyId: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       lastMessageAt: messageTimestamp,
     });
@@ -193,15 +202,23 @@ async function handleIncomingMessage(tenantId, data) {
   // bagunça a prévia/ordenação da lista de conversas.
   if (!existing.empty) {
     const contactSnap = await contactsRef.doc(contactId).get();
-    const currentLastMessageAt = contactSnap.data()?.lastMessageAt;
+    const currentData = contactSnap.data() || {};
+    const currentLastMessageAt = currentData.lastMessageAt;
     const isNewer =
       !currentLastMessageAt ||
       !msgDate ||
       msgDate.getTime() >= currentLastMessageAt.toDate().getTime();
 
+    // Se a empresa (agente) respondeu e a conversa ainda estava "pendente"
+    // (primeiro contato dela com esse cliente), promove pra "potencial".
+    // "ativo" nunca é alterado automaticamente — só manualmente pelo atendente.
+    const statusUpdate =
+      fromMe && currentData.status === "pendente" ? { status: "potencial" } : {};
+
     await contactsRef.doc(contactId).update({
       ...(isNewer ? { preview: (isGroup && !fromMe ? `${senderName}: ` : "") + text, lastMessageAt: messageTimestamp } : {}),
       ...(isGroup ? { isGroup: true } : {}),
+      ...statusUpdate,
       unread: fromMe ? 0 : admin.firestore.FieldValue.increment(1),
     });
   }
@@ -232,17 +249,23 @@ app.post("/api/send", requireAuth, async (req, res) => {
     const result = await evo.sendText(tenantId, phone, text);
 
     if (contactId) {
-      await db.collection("tenants").doc(tenantId)
-        .collection("contacts").doc(contactId)
-        .collection("messages").add({
-          from: "agent",
-          text,
-          agentUid: req.user.uid,
-          messageId: result?.key?.id || null,
-          timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      await db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId)
-        .update({ preview: text, lastMessageAt: admin.firestore.FieldValue.serverTimestamp() });
+      const contactRef = db.collection("tenants").doc(tenantId).collection("contacts").doc(contactId);
+      await contactRef.collection("messages").add({
+        from: "agent",
+        text,
+        agentUid: req.user.uid,
+        messageId: result?.key?.id || null,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      // Primeira resposta da empresa promove a conversa de "pendente" pra "potencial".
+      // "ativo" nunca é mexido automaticamente.
+      const contactSnap = await contactRef.get();
+      const statusUpdate = contactSnap.data()?.status === "pendente" ? { status: "potencial" } : {};
+      await contactRef.update({
+        preview: text,
+        lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...statusUpdate,
+      });
     }
 
     res.json({ ok: true, result });
