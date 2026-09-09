@@ -108,7 +108,24 @@
 .fd-scope .status-pill.off{ background:rgba(239,68,68,.12); color:var(--red); }
 .fd-scope .status-pill.off .dot{ background:var(--red); box-shadow:0 0 0 3px rgba(239,68,68,.2); }
 
-/* ── tela de conectar (estilo onboard do FlowDesk) ── */
+/* ── busca, abas de filtro e cards de contagem (Potenciais/Pendentes/Ativos) ── */
+.fd-scope .search-box{ background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); display:flex; align-items:center; gap:7px; padding:6px 9px; margin-bottom:7px; }
+.fd-scope .search-box input{ background:none; border:none; outline:none; color:var(--text); font-family:inherit; font-size:12px; flex:1; }
+.fd-scope .search-box input::placeholder{ color:var(--text3); }
+.fd-scope .search-box svg{ flex-shrink:0; color:var(--text3); }
+.fd-scope .tabs{ display:flex; gap:2px; background:var(--surface2); padding:3px; border-radius:var(--radius-sm); }
+.fd-scope .tab{ flex:1; padding:4px 2px; border-radius:5px; font-size:11px; font-weight:500; cursor:pointer; text-align:center; color:var(--text3); transition:all .15s; user-select:none; }
+.fd-scope .tab.active{ background:var(--accent); color:#fff; }
+.fd-scope .tab:hover:not(.active){ color:var(--text2); }
+.fd-scope .stats-row{ display:flex; gap:5px; padding:7px 10px; flex-shrink:0; }
+.fd-scope .stat-chip{ flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:5px; text-align:center; cursor:pointer; transition:border-color .15s; }
+.fd-scope .stat-chip:hover{ border-color:var(--border2); }
+.fd-scope .stat-num{ font-size:14px; font-weight:600; }
+.fd-scope .stat-lbl{ font-size:9px; color:var(--text3); text-transform:uppercase; letter-spacing:.05em; }
+.fd-scope .section-label{ font-size:10px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:.08em; padding:7px 6px 3px; }
+.fd-scope .contact-meta{ text-align:right; flex-shrink:0; display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.fd-scope .contact-time{ font-size:10px; color:var(--text3); }
+.fd-scope .status-select{ background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text2); font-family:inherit; font-size:9px; padding:1px 3px; cursor:pointer; }
 .fd-scope .fd-connect-wrap{ flex:1; display:flex; align-items:center; justify-content:center; background:var(--bg); background-image:radial-gradient(circle at 20% 80%,rgba(79,124,255,.06) 0%,transparent 50%), radial-gradient(circle at 80% 20%,rgba(108,79,255,.06) 0%,transparent 50%); }
 .fd-scope .onboard-card{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:30px; width:400px; max-width:92vw; text-align:center; box-shadow:var(--shadow-md); }
 .fd-scope .onboard-card-title{ font-size:17px; font-weight:700; margin-bottom:6px; }

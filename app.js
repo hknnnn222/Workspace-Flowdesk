@@ -1575,6 +1575,37 @@ function DetailDrawer({drawer, onClose, tasks, activities, contacts, onToggleTas
   );
 }
 
+/* Card de um contato/grupo na lista de conversas do Bot de IA, com avatar
+   colorido por pessoa, badge de não-lidas, e um seletor pra reclassificar o
+   status (Potencial/Pendente/Ativo) sem precisar abrir a conversa. */
+function ContactCard({c, selected, onSelect, onChangeStatus}){
+  return (
+    <div className={"contact-card"+(selected?" active":"")} onClick={onSelect}>
+      <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(c.phone||c.name)})`}}>
+        {(c.name||c.phone||'?').slice(0,2).toUpperCase()}
+        {c.isGroup && <span className="channel-dot" title="Grupo">👥</span>}
+      </div>
+      <div className="contact-info">
+        <div className="contact-name">{c.name || c.phone}</div>
+        <div className="contact-preview">{c.preview || ''}</div>
+      </div>
+      <div className="contact-meta" onClick={e=>e.stopPropagation()}>
+        {c.unread>0 && <span className="contact-badge">{c.unread}</span>}
+        <select
+          className="status-select"
+          value={c.status||'potencial'}
+          onChange={e=>onChangeStatus(c.id, e.target.value)}
+          title="Mudar status"
+        >
+          <option value="potencial">Potencial</option>
+          <option value="pendente">Pendente</option>
+          <option value="ativo">Ativo</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Bot de IA / WhatsApp Module (Evolution API + Firebase) ----------------
    Cada empresa (workspace) é um "tenant" isolado. O tenantId usado na Evolution API
    e no Firestore é o próprio workspaceId (ex: "ws_atlas"), então cada empresa conecta
@@ -1596,6 +1627,9 @@ function BotModule({workspaceId, workspaceName, userId}){
   const [loadingMoreContacts, setLoadingMoreContacts] = useState(false);
   const contactsScrollRef = useRef(null);
   const CONTACTS_PAGE_SIZE = 30;
+  const [statusFilter, setStatusFilter] = useState('todos'); // 'todos' | 'potencial' | 'pendente' | 'ativo'
+  const [contactCounts, setContactCounts] = useState({potencial:0, pendente:0, ativo:0});
+  const [contactSearch, setContactSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [recentMessages, setRecentMessages] = useState([]); // últimas N, em tempo real
   const [olderMessages, setOlderMessages] = useState([]);   // histórico carregado ao rolar pra cima
@@ -1652,13 +1686,29 @@ function BotModule({workspaceId, workspaceName, userId}){
 }, [configured, sessionReady, workspaceId, waStatus?.status]);
 
   // 3) Escuta contatos em tempo real (só os mais recentes — o resto carrega
-  //    sob demanda conforme o usuário rola a lista pra baixo)
+  //    sob demanda conforme o usuário rola a lista pra baixo). Reinicia a
+  //    lista sempre que o filtro de status (aba) muda.
   useEffect(()=>{
     if(!configured || !sessionReady || !workspaceId) return;
-    setContacts([]); setSelectedId(null); setHasMoreContacts(true);
-    const unsub = api.listenContacts(workspaceId, CONTACTS_PAGE_SIZE, (list)=> setContacts(list));
+    setContacts([]); setHasMoreContacts(true);
+    const statusArg = statusFilter==='todos' ? null : statusFilter;
+    const unsub = api.listenContacts(workspaceId, CONTACTS_PAGE_SIZE, (list)=> setContacts(list), statusArg);
     return ()=> unsub && unsub();
-  },[configured, sessionReady, workspaceId]);
+  },[configured, sessionReady, workspaceId, statusFilter]);
+
+  // reseta a conversa selecionada só quando troca de empresa (não quando só
+  // troca a aba de filtro, pra não fechar o chat aberto à toa)
+  useEffect(()=>{ setSelectedId(null); },[configured, sessionReady, workspaceId]);
+
+  // Contagem de cada status pra mostrar nos "chips" (Potenciais/Pendentes/Ativos)
+  useEffect(()=>{
+    if(!configured || !sessionReady || !workspaceId) return;
+    let cancelled = false;
+    api.getContactCounts(workspaceId).then(counts=>{
+      if(!cancelled) setContactCounts(counts);
+    }).catch(err=>console.error("Erro ao contar contatos:", err));
+    return ()=>{ cancelled = true; };
+  },[configured, sessionReady, workspaceId, contacts.length]);
 
   // Busca mais contatos antigos quando o usuário rola pro final da lista
   async function loadMoreContacts(){
@@ -1667,7 +1717,8 @@ function BotModule({workspaceId, workspaceName, userId}){
     if(!last){ setHasMoreContacts(false); return; }
     setLoadingMoreContacts(true);
     try{
-      const more = await api.loadMoreContacts(workspaceId, last, CONTACTS_PAGE_SIZE);
+      const statusArg = statusFilter==='todos' ? null : statusFilter;
+      const more = await api.loadMoreContacts(workspaceId, last, CONTACTS_PAGE_SIZE, statusArg);
       if(!more.length || more.length < CONTACTS_PAGE_SIZE) setHasMoreContacts(false);
       if(more.length){
         setContacts(prev=>{
@@ -1688,6 +1739,39 @@ function BotModule({workspaceId, workspaceName, userId}){
       loadMoreContacts();
     }
   }
+
+  async function handleChangeStatus(contactId, newStatus){
+    try{
+      await api.setContactStatus(workspaceId, contactId, newStatus);
+      // atualização otimista: já reflete na tela sem esperar o listener
+      setContacts(prev=>prev.map(c=>c.id===contactId ? {...c, status:newStatus} : c));
+    }catch(err){
+      console.error("Erro ao mudar status do contato:", err);
+    }
+  }
+
+  // Lista visível: aplica a busca por nome/telefone por cima do que já foi
+  // carregado. Quando o filtro é "Todos", agrupa em seções (Potenciais /
+  // Pendentes / Ativos), como no design de referência.
+  const visibleContacts = useMemo(()=>{
+    const q = contactSearch.trim().toLowerCase();
+    if(!q) return contacts;
+    return contacts.filter(c=>
+      (c.name||'').toLowerCase().includes(q) || (c.phone||'').includes(q)
+    );
+  },[contacts, contactSearch]);
+
+  const groupedContacts = useMemo(()=>{
+    if(statusFilter!=='todos') return null; // não agrupa quando já filtrou uma aba específica
+    const groups = {potencial:[], pendente:[], ativo:[]};
+    visibleContacts.forEach(c=>{
+      const key = groups[c.status] ? c.status : 'potencial';
+      groups[key].push(c);
+    });
+    return groups;
+  },[visibleContacts, statusFilter]);
+
+  const STATUS_LABELS = {potencial:'Potenciais', pendente:'Pendentes', ativo:'Ativos'};
 
   // 4) Escuta em tempo real só as últimas mensagens do contato selecionado
   useEffect(()=>{
@@ -1939,25 +2023,48 @@ function BotModule({workspaceId, workspaceName, userId}){
                   {disconnecting ? "Desconectando..." : "Desconectar"}
                 </button>
               </div>
+              <div className="search-box">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" placeholder="Buscar contato..." value={contactSearch} onChange={e=>setContactSearch(e.target.value)} />
+              </div>
+              <div className="tabs">
+                <div className={"tab"+(statusFilter==='todos'?' active':'')} onClick={()=>setStatusFilter('todos')}>Todos</div>
+                <div className={"tab"+(statusFilter==='potencial'?' active':'')} onClick={()=>setStatusFilter('potencial')}>Potenciais</div>
+                <div className={"tab"+(statusFilter==='pendente'?' active':'')} onClick={()=>setStatusFilter('pendente')}>Pendentes</div>
+                <div className={"tab"+(statusFilter==='ativo'?' active':'')} onClick={()=>setStatusFilter('ativo')}>Ativos</div>
+              </div>
+            </div>
+            <div className="stats-row">
+              <div className="stat-chip" onClick={()=>setStatusFilter('potencial')}>
+                <div className="stat-num" style={{color:'var(--accent)'}}>{contactCounts.potencial}</div>
+                <div className="stat-lbl">Potenciais</div>
+              </div>
+              <div className="stat-chip" onClick={()=>setStatusFilter('pendente')}>
+                <div className="stat-num" style={{color:'var(--yellow)'}}>{contactCounts.pendente}</div>
+                <div className="stat-lbl">Pendentes</div>
+              </div>
+              <div className="stat-chip" onClick={()=>setStatusFilter('ativo')}>
+                <div className="stat-num" style={{color:'var(--green)'}}>{contactCounts.ativo}</div>
+                <div className="stat-lbl">Ativos</div>
+              </div>
             </div>
             <div className="contacts-scroll" ref={contactsScrollRef} onScroll={handleContactsScroll}>
               {actionError && <div className="fd-error">{actionError}</div>}
-              {contacts.length===0 && <div className="fd-empty">Nenhuma conversa ainda. Assim que alguém escrever para o número conectado, aparece aqui.</div>}
-              {contacts.map(c=>(
-                <div key={c.id} className={"contact-card"+(selectedId===c.id?" active":"")} onClick={()=>setSelectedId(c.id)}>
-                  <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(c.phone||c.name)})`}}>
-                    {(c.name||c.phone||'?').slice(0,2).toUpperCase()}
-                    <span className="channel-dot" title={c.isGroup ? "Grupo" : "WhatsApp"}>{c.isGroup ? "👥" : ""}</span>
-                  </div>
-                  <div className="contact-info">
-                    <div className="contact-name">
-                      {c.name || c.phone}
-                      {c.unread>0 && <span className="contact-badge">{c.unread}</span>}
-                    </div>
-                    <div className="contact-preview">{c.preview || ''}</div>
-                  </div>
-                </div>
-              ))}
+              {visibleContacts.length===0 && <div className="fd-empty">Nenhuma conversa por aqui ainda.</div>}
+              {groupedContacts ? (
+                Object.entries(groupedContacts).map(([key, arr])=> arr.length>0 && (
+                  <React.Fragment key={key}>
+                    <div className="section-label">{STATUS_LABELS[key]}</div>
+                    {arr.map(c=>(
+                      <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} />
+                    ))}
+                  </React.Fragment>
+                ))
+              ) : (
+                visibleContacts.map(c=>(
+                  <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} />
+                ))
+              )}
               {loadingMoreContacts && (
                 <div style={{textAlign:'center', padding:'10px', fontSize:'11px', color:'var(--text3)'}}>Carregando mais conversas...</div>
               )}
