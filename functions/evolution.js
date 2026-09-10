@@ -58,7 +58,13 @@ async function createInstance(instanceName, webhookUrl) {
     instanceName,
     qrcode: true,
     integration: "WHATSAPP-BAILEYS",
-    syncFullHistory: true, // pede pro WhatsApp mandar o historico de conversas antigas
+    // Desligado de propósito: sincronizar todo o histórico antigo do WhatsApp
+    // de uma vez (mensagens de ANTES de conectar) sobrecarrega a memória do
+    // servidor no boot e gera uma enxurrada de escritas no Firestore de uma
+    // vez só. Com isso desligado, tudo que acontece a partir da conexão
+    // continua sendo salvo normalmente e para sempre — só o passado anterior
+    // à conexão não é trazido automaticamente.
+    syncFullHistory: false,
     webhook: {
       url: webhookUrl,
       byEvents: false,
