@@ -157,3 +157,11 @@
 .fd-scope .quick-reply-text{ font-size:12px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .fd-scope input[type="color"]{ border-radius:6px; overflow:hidden; }
 .fd-scope input[type="radio"]{ accent-color:var(--accent); cursor:pointer; }
+
+/* ── menu de ações (⋮) no card do contato — ex: "Enviar para o CRM" ── */
+.fd-scope .card-menu-btn{ width:20px; height:20px; display:flex; align-items:center; justify-content:center; border-radius:5px; cursor:pointer; color:var(--text3); font-size:14px; line-height:1; flex-shrink:0; transition:background .12s; }
+.fd-scope .card-menu-btn:hover{ background:var(--surface3); color:var(--text); }
+.fd-scope .card-menu-backdrop{ position:fixed; inset:0; z-index:998; }
+.fd-scope .card-menu{ position:absolute; top:22px; right:0; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; box-shadow:var(--shadow-md); z-index:999; min-width:170px; overflow:hidden; }
+.fd-scope .card-menu-item{ padding:8px 12px; font-size:12px; font-weight:500; color:var(--text); cursor:pointer; white-space:nowrap; transition:background .1s; }
+.fd-scope .card-menu-item:hover{ background:var(--surface3); }

@@ -1596,8 +1596,11 @@ function DetailDrawer({drawer, onClose, tasks, activities, contacts, onToggleTas
 /* Card de um contato/grupo na lista de conversas do Bot de IA, com avatar
    colorido por pessoa, badge de não-lidas, e um seletor pra reclassificar o
    status (Potencial/Pendente/Ativo) sem precisar abrir a conversa. */
-function ContactCard({c, selected, onSelect, onChangeStatus, labelsById}){
+function ContactCard({c, selected, onSelect, onChangeStatus, labelsById, crmEnabled, onSendToCrm}){
   const tags = c.tags || [];
+  const [menuOpen, setMenuOpen] = useState(false);
+  const canSendToCrm = crmEnabled && c.status==='ativo' && !c.crmContactId;
+
   return (
     <div className={"contact-card"+(selected?" active":"")} onClick={onSelect}>
       <div className="contact-avatar" style={{background:`linear-gradient(135deg,${avatarColorFor(c.phone||c.name)})`}}>
@@ -1608,6 +1611,7 @@ function ContactCard({c, selected, onSelect, onChangeStatus, labelsById}){
         <div className="contact-name">
           {c.name || c.phone}
           {c.assignedToName && <span title={"Atribuído a "+c.assignedToName} style={{fontSize:10, color:'var(--text3)', fontWeight:500}}>· {c.assignedToName}</span>}
+          {c.crmContactId && <span title="Já está no CRM" style={{fontSize:10, color:'var(--green)', fontWeight:600}}>· ✓ CRM</span>}
         </div>
         <div className="contact-preview">{c.preview || ''}</div>
         {tags.length>0 && (
@@ -1625,16 +1629,37 @@ function ContactCard({c, selected, onSelect, onChangeStatus, labelsById}){
       </div>
       <div className="contact-meta" onClick={e=>e.stopPropagation()}>
         {c.unread>0 && <span className="contact-badge">{c.unread}</span>}
-        <select
-          className="status-select"
-          value={c.status||'potencial'}
-          onChange={e=>onChangeStatus(c.id, e.target.value)}
-          title="Mudar status"
-        >
-          <option value="potencial">Potencial</option>
-          <option value="pendente">Pendente</option>
-          <option value="ativo">Ativo</option>
-        </select>
+        <div style={{display:'flex', alignItems:'center', gap:3, position:'relative'}}>
+          <select
+            className="status-select"
+            value={c.status||'potencial'}
+            onChange={e=>onChangeStatus(c.id, e.target.value)}
+            title="Mudar status"
+          >
+            <option value="potencial">Potencial</option>
+            <option value="pendente">Pendente</option>
+            <option value="ativo">Ativo</option>
+          </select>
+          {canSendToCrm && (
+            <React.Fragment>
+              <span
+                className="card-menu-btn"
+                title="Mais ações"
+                onClick={()=>setMenuOpen(o=>!o)}
+              >⋮</span>
+              {menuOpen && (
+                <React.Fragment>
+                  <div className="card-menu-backdrop" onClick={()=>setMenuOpen(false)}></div>
+                  <div className="card-menu">
+                    <div className="card-menu-item" onClick={()=>{ setMenuOpen(false); onSendToCrm(c); }}>
+                      → Enviar para o CRM
+                    </div>
+                  </div>
+                </React.Fragment>
+              )}
+            </React.Fragment>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1681,6 +1706,7 @@ function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnab
   const [showQuickModal, setShowQuickModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showCrmModal, setShowCrmModal] = useState(false);
+  const [crmModalContact, setCrmModalContact] = useState(null); // contato-alvo do modal de CRM (pode ser diferente do selecionado no chat)
   const [quickSearch, setQuickSearch] = useState('');
   const [newQuickReply, setNewQuickReply] = useState(null); // {trigger,text,category} enquanto edita
   const [newLabelDraft, setNewLabelDraft] = useState(null); // {name,color} enquanto cria etiqueta nova
@@ -1884,26 +1910,36 @@ function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnab
     return quickReplies.filter(r=> r.trigger.toLowerCase().includes(q) || r.text.toLowerCase().includes(q));
   },[quickReplies, quickSearch]);
 
+  // Abre o modal de envio ao CRM para um contato específico — usado tanto
+  // pelo botão "→ CRM" no cabeçalho da conversa aberta quanto pelo menu de
+  // ações (⋮) direto no card da lista, sem precisar abrir a conversa antes.
+  function openCrmModalFor(contact){
+    setCrmModalContact(contact);
+    setShowCrmModal(true);
+  }
+
   // ── Enviar para o CRM (cria/vincula Empresa + Contato) ──
   async function handleSendToCrm({ mode, companyId, newCompanyName, contactName, roleTitle }){
-    if(!selectedContact) return;
+    const target = crmModalContact;
+    if(!target) return;
     setCrmSaving(true);
     try{
       let finalCompanyId = companyId;
       if(mode==='new'){
-        finalCompanyId = saveCompany({ name:newCompanyName, segment:'', size:'11-50', cnpj:'', phone:selectedContact.phone, email:'' });
+        finalCompanyId = saveCompany({ name:newCompanyName, segment:'', size:'11-50', cnpj:'', phone:target.phone, email:'' });
       }
       const newContactId = saveContact({
-        name: contactName || selectedContact.name || selectedContact.phone,
+        name: contactName || target.name || target.phone,
         role_title: roleTitle || '',
         company_id: finalCompanyId || '',
-        phone: selectedContact.phone,
+        phone: target.phone,
         email: '',
         cpf: '',
       });
-      await api.linkContactToCrm(workspaceId, selectedContact.id, { crmContactId:newContactId, crmCompanyId:finalCompanyId||null });
-      setContacts(prev=>prev.map(c=>c.id===selectedContact.id ? {...c, crmContactId:newContactId, crmCompanyId:finalCompanyId||null} : c));
+      await api.linkContactToCrm(workspaceId, target.id, { crmContactId:newContactId, crmCompanyId:finalCompanyId||null });
+      setContacts(prev=>prev.map(c=>c.id===target.id ? {...c, crmContactId:newContactId, crmCompanyId:finalCompanyId||null} : c));
       setShowCrmModal(false);
+      setCrmModalContact(null);
     }catch(err){
       console.error("Erro ao enviar para o CRM:", err);
       setActionError("Erro ao enviar para o CRM: " + String(err.message||err));
@@ -2218,13 +2254,13 @@ function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnab
                   <React.Fragment key={key}>
                     <div className="section-label">{STATUS_LABELS[key]}</div>
                     {arr.map(c=>(
-                      <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} />
+                      <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} crmEnabled={crmEnabled} onSendToCrm={openCrmModalFor} />
                     ))}
                   </React.Fragment>
                 ))
               ) : (
                 visibleContacts.map(c=>(
-                  <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} />
+                  <ContactCard key={c.id} c={c} selected={selectedId===c.id} onSelect={()=>setSelectedId(c.id)} onChangeStatus={handleChangeStatus} labelsById={labelsById} crmEnabled={crmEnabled} onSendToCrm={openCrmModalFor} />
                 ))
               )}
               {loadingMoreContacts && (
@@ -2269,8 +2305,8 @@ function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnab
                     <button className="btn sm" onClick={()=>setShowLabelsModal(true)} title="Etiquetas">🏷️</button>
                     <button className="btn sm" onClick={()=>setShowQuickModal(true)} title="Mensagens rápidas">⚡</button>
                     <button className="btn sm" onClick={()=>setShowTransferModal(true)} title="Transferir atendimento">↗️</button>
-                    {crmEnabled && !selectedContact?.crmContactId && (
-                      <button className="btn sm primary" onClick={()=>setShowCrmModal(true)} title="Enviar para o CRM">→ CRM</button>
+                    {crmEnabled && selectedContact?.status==='ativo' && !selectedContact?.crmContactId && (
+                      <button className="btn sm primary" onClick={()=>openCrmModalFor(selectedContact)} title="Enviar para o CRM">→ CRM</button>
                     )}
                   </div>
                 </div>
@@ -2444,12 +2480,12 @@ function BotModule({workspaceId, workspaceName, userId, currentUserName, crmEnab
       )}
 
       {/* ── Modal: Enviar para o CRM ── */}
-      {showCrmModal && selectedContact && (
+      {showCrmModal && crmModalContact && (
         <CrmSendModal
-          contact={selectedContact}
+          contact={crmModalContact}
           companies={companies}
           saving={crmSaving}
-          onClose={()=>setShowCrmModal(false)}
+          onClose={()=>{ setShowCrmModal(false); setCrmModalContact(null); }}
           onSend={handleSendToCrm}
         />
       )}
