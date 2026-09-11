@@ -24,7 +24,22 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 const app = express();
-app.use(cors({ origin: true }));
+// CORS restrito: só o domínio real do front pode chamar essa API. Antes
+// estava "origin: true", que reflete QUALQUER origem que pedir — ou seja,
+// qualquer site na internet podia chamar /api/* a partir do navegador de um
+// visitante. Ajuste ALLOWED_ORIGINS se adicionar um domínio próprio depois.
+const ALLOWED_ORIGINS = [
+  "https://workspace-flowdesk.vercel.app",
+];
+app.use(cors({
+  origin: (origin, callback) => {
+    // requisições sem "origin" (ex: server-to-server, curl, o próprio webhook
+    // da Evolution API) não têm origem de navegador pra checar — são liberadas
+    // aqui; a proteção real delas é o requireAuth/token, não o CORS.
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    return callback(new Error("Origem não permitida por CORS: " + origin));
+  },
+}));
 app.use(express.json({ limit: "15mb" }));
 app.use((req, res, next) => {
   res.set("Cache-Control", "no-store, must-revalidate");
@@ -44,14 +59,38 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// Confere que o tenantId que o cliente está tentando usar é EXATAMENTE o
+// mesmo tenantId gravado no custom claim do token dele (carimbado em
+// /api/claim-tenant). Sem isso, qualquer usuário autenticado poderia mandar
+// um tenantId diferente no corpo/URL da requisição e mexer nos dados de
+// outra empresa — o token provava só "sou alguém", não "sou dessa empresa".
+// Use em toda rota que recebe tenantId do cliente (body, params ou query).
+function requireTenantMatch(req, res, next) {
+  const claimedTenant = req.user && req.user.tenantId;
+  const requestedTenant = req.body?.tenantId || req.params?.tenantId || req.query?.tenantId;
+  if (!claimedTenant) {
+    return res.status(403).json({ error: "Este usuário ainda não está vinculado a nenhuma empresa (tenantId ausente no token)." });
+  }
+  if (!requestedTenant || requestedTenant !== claimedTenant) {
+    return res.status(403).json({ error: "Acesso negado: tenantId não corresponde à empresa vinculada a este usuário." });
+  }
+  next();
+}
+
 // 0) CLAIM TENANT
 app.post("/api/claim-tenant", requireAuth, async (req, res) => {
   try {
-    const { tenantId, role } = req.body;
+    const { tenantId } = req.body;
     if (!tenantId) return res.status(400).json({ error: "tenantId obrigatório" });
+    // "role" NUNCA vem do body — um cliente poderia mandar role:"admin" e se
+    // promover sozinho. Se o usuário já tinha um role carimbado antes, mantém;
+    // senão, entra como "agent" (o mínimo). Promover alguém a admin é uma ação
+    // que deve acontecer por um fluxo separado, controlado pelo backend/painel
+    // de administração — nunca a partir do que o próprio cliente envia aqui.
+    const previousRole = req.user.role;
     await admin.auth().setCustomUserClaims(req.user.uid, {
       tenantId,
-      role: role || "agent",
+      role: previousRole || "agent",
     });
     res.json({ ok: true, tenantId });
   } catch (err) {
@@ -61,9 +100,32 @@ app.post("/api/claim-tenant", requireAuth, async (req, res) => {
 });
 
 // 1) WEBHOOK — recebe eventos da Evolution API
+// Protegido por apikey: a Evolution API inclui o campo "apikey" dentro do
+// PRÓPRIO CORPO JSON de todo webhook que ela dispara (junto com "event",
+// "instance", "data" etc — confirmado na documentação oficial), com o mesmo
+// valor da apikey da instância. Como você usa uma única EVOLUTION_APIKEY
+// global pra todas as instâncias, comparamos com ela. Sem essa checagem,
+// QUALQUER pessoa na internet podia chamar essa URL diretamente (curl,
+// script, bot) e injetar contatos/mensagens falsas no Firestore — essa rota
+// nunca passa por login, então a apikey no corpo é a única forma de provar
+// "essa chamada realmente veio da minha instância Evolution".
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return require("crypto").timingSafeEqual(bufA, bufB);
+}
+
 app.post("/webhook/:instanceName", async (req, res) => {
-  const { instanceName } = req.params;
   const body = req.body || {};
+  const receivedKey = body.apikey;
+  const expectedKey = process.env.EVOLUTION_APIKEY;
+  if (!expectedKey || typeof receivedKey !== "string" || !timingSafeEqual(receivedKey, expectedKey)) {
+    console.warn("Webhook rejeitado: apikey ausente ou incorreta.", { instanceName: req.params.instanceName });
+    return res.status(401).json({ ok: false, error: "apikey inválida" });
+  }
+
+  const { instanceName } = req.params;
   const event = body.event;
 
   // LOG TEMPORÁRIO — dá pra remover depois que descobrirmos o nome certo do evento de histórico
@@ -240,7 +302,7 @@ async function handleIncomingMessage(tenantId, data) {
 }
 
 // 2) ENVIAR MENSAGEM
-app.post("/api/send", requireAuth, async (req, res) => {
+app.post("/api/send", requireAuth, requireTenantMatch, async (req, res) => {
   try {
     const { tenantId, contactId, phone, text } = req.body;
     if (!tenantId || !phone || !text) {
@@ -276,7 +338,7 @@ app.post("/api/send", requireAuth, async (req, res) => {
 });
 
 // 3) CONECTAR WHATSAPP — cria instância + retorna QR code
-app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
+app.post("/api/whatsapp/connect", requireAuth, requireTenantMatch, async (req, res) => {
   try {
     const { tenantId } = req.body;
     if (!tenantId) {
@@ -329,7 +391,7 @@ app.post("/api/whatsapp/connect", requireAuth, async (req, res) => {
 });
 
 // 4) STATUS DA CONEXÃO
-app.get("/api/whatsapp/status/:tenantId", requireAuth, async (req, res) => {
+app.get("/api/whatsapp/status/:tenantId", requireAuth, requireTenantMatch, async (req, res) => {
   try {
     const { tenantId } = req.params;
     const result = await evo.getStatus(tenantId);
@@ -361,7 +423,7 @@ app.get("/api/whatsapp/status/:tenantId", requireAuth, async (req, res) => {
 });
 
 // 5) DESCONECTAR
-app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
+app.post("/api/whatsapp/disconnect", requireAuth, requireTenantMatch, async (req, res) => {
   try {
     const { tenantId } = req.body;
     await evo.deleteInstance(tenantId);
@@ -378,11 +440,18 @@ app.post("/api/whatsapp/disconnect", requireAuth, async (req, res) => {
   }
 });
 
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin" && req.user?.role !== "superadmin") {
+    return res.status(403).json({ error: "Apenas administradores podem executar esta ação." });
+  }
+  next();
+}
+
 // 6) ROTA TEMPORÁRIA — apaga a coleção "contacts" (e mensagens dentro) de um
 // tenant, em LOTES, um pouco de cada vez, pra nunca estourar o tempo limite
 // da function em coleções grandes. Chame repetidamente até vir "done: true".
 // REMOVA ESSA ROTA depois de usar.
-app.post("/api/admin/wipe-contacts", requireAuth, async (req, res) => {
+app.post("/api/admin/wipe-contacts", requireAuth, requireTenantMatch, requireAdmin, async (req, res) => {
   const startedAt = Date.now();
   const TIME_BUDGET_MS = 45000; // pára de apagar mais e responde antes dos 60s da function
   let deletedContacts = 0;
