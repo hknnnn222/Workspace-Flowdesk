@@ -1,7 +1,7 @@
 {
   "name": "flowdesk-backend",
   "description": "Backend FlowDesk - Vercel Serverless + Evolution API",
-  "engines": { "node": "20.x" },
+  "engines": { "node": "24.x" },
   "main": "api/index.js",
   "scripts": {
     "dev": "vercel dev"
