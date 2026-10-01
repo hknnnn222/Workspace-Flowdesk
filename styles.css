@@ -157,19 +157,44 @@ body{
 .owner-cell{display:flex;align-items:center;gap:8px;}
 
 /* ---------- Kanban ---------- */
-.kanban-wrap{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px;}
+.kanban-wrap{
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding-bottom:10px;
+  height: 420px;
+  align-items: stretch;
+}
 .kanban-col{
-  min-width:260px;flex-shrink:0;background:#efeadf;border-radius:var(--radius);
-  padding:10px;display:flex;flex-direction:column;
+  min-width:210px;
+  max-width:230px;
+  flex-shrink:0;
+  background:#efeadf;
+  border-radius:var(--radius);
+  padding:8px;
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  overflow:hidden;
 }
 .kanban-col.drag-over{outline:2px dashed var(--accent);outline-offset:-2px;}
 .kanban-col-head{
   display:flex;justify-content:space-between;align-items:center;
-  padding:4px 6px 10px;font-family:var(--mono);font-size:11.5px;text-transform:uppercase;
+  padding:4px 4px 4px;font-family:var(--mono);font-size:11px;text-transform:uppercase;
   letter-spacing:.05em;color:var(--muted);
+  flex-shrink:0;
 }
-.kanban-col-head b{color:var(--ink);font-family:var(--sans);text-transform:none;font-size:13px;}
-.kanban-cards{display:flex;flex-direction:column;gap:8px;min-height:40px;}
+.kanban-col-head b{color:var(--ink);font-family:var(--sans);text-transform:none;font-size:12.5px;}
+.kanban-cards{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-height:0;
+  flex:1;
+  overflow-y:auto;
+  padding-right:3px;
+}
 .deal-card{
   background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;
   cursor:grab;box-shadow:0 1px 2px rgba(0,0,0,.03);
@@ -180,7 +205,7 @@ body{
 .deal-company{font-size:12px;color:var(--muted);margin-bottom:8px;}
 .deal-meta{display:flex;justify-content:space-between;align-items:center;}
 .deal-value{font-family:var(--mono);font-size:12.5px;color:var(--accent);font-weight:600;}
-.stage-total{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;}
+.stage-total{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;flex-shrink:0;margin-bottom:6px;}
 
 /* ---------- Detail panel / drawer ---------- */
 .overlay{
@@ -282,6 +307,18 @@ body{
   display:inline-block;font-size:10.5px;font-family:var(--mono);color:var(--red);margin-top:6px;
 }
 .inactivity-tag.ok{color:var(--muted);}
+
+.card-actions{display:flex;gap:6px;margin-top:8px;}
+.card-action-btn{
+  flex:1;text-align:center;padding:5px 4px;border-radius:6px;font-size:11.5px;font-weight:600;
+  border:1.5px solid var(--line);cursor:pointer;background:transparent;font-family:var(--sans);
+  transition:all .12s ease;
+}
+.card-action-btn:hover{transform:scale(1.02);}
+.card-action-btn.won{color:#2c5f4f;border-color:#2c5f4f;}
+.card-action-btn.won:hover{background:var(--accent-soft);}
+.card-action-btn.lost{color:#a8402f;border-color:#a8402f;}
+.card-action-btn.lost:hover{background:#fbeae7;}
 
 .drop-zones{display:flex;gap:8px;margin-top:6px;}
 .drop-zone{
